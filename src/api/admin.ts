@@ -11,15 +11,18 @@ export interface LoginCredentials {
   password: string;
 }
 
+// Match SimpleJWT-style response
 export interface LoginResponse {
-  token: string;
-  admin: AdminInfo;
+  access: string;
+  refresh: string;
 }
 
-export const login = (credentials: LoginCredentials) => 
-  api.post<LoginResponse>('/admin/login', credentials);
+// Call your Django JWT endpoint
+export const login = (credentials: LoginCredentials) =>
+  api.post<LoginResponse>('/auth/login/', credentials);
 
+// These endpoints should be protected; axiosInstance should attach the token
 export const getAdminInfo = () => api.get<AdminInfo>('/admin/info');
 
-export const updateAdminInfo = (data: Partial<AdminInfo> & { password?: string }) => 
+export const updateAdminInfo = (data: Partial<AdminInfo> & { password?: string }) =>
   api.put<AdminInfo>('/admin/info', data);

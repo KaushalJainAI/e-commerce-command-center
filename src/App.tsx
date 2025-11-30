@@ -12,7 +12,7 @@ import Products from "./pages/Products";
 import Combos from "./pages/Combos";
 import ProductGraph from "./pages/ProductGraph";
 import Orders from "./pages/Orders";
-import RecycleBin from "./pages/RecycleBin";
+// import RecycleBin from "./pages/RecycleBin";
 import Coupons from "./pages/Coupons";
 import ShippingPolicy from "./pages/ShippingPolicy";
 import ReturnPolicy from "./pages/ReturnPolicy";
@@ -45,7 +45,7 @@ const App = () => (
               <Route path="combos" element={<Combos />} />
               <Route path="graph" element={<ProductGraph />} />
               <Route path="orders" element={<Orders />} />
-              <Route path="recycle-bin" element={<RecycleBin />} />
+              {/* <Route path="recycle-bin" element={<RecycleBin />} /> */}
               <Route path="coupons" element={<Coupons />} />
               <Route path="shipping-policy" element={<ShippingPolicy />} />
               <Route path="return-policy" element={<ReturnPolicy />} />

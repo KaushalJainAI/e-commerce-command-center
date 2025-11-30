@@ -33,13 +33,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const login = async (email: string, password: string) => {
     try {
       const response = await apiLogin({ email, password });
-      localStorage.setItem('admin_token', response.data.token);
+      // response.data.access is the token
+      localStorage.setItem('admin_token', response.data.access);
       setIsAuthenticated(true);
       navigate('/dashboard');
     } catch (error) {
       throw new Error('Invalid credentials');
     }
   };
+
 
   const logout = () => {
     localStorage.removeItem('admin_token');

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getCoupons, createCoupon, updateCoupon, deleteCoupon, Coupon, DiscountType, AppliesTo } from '@/api/coupons';
+import { getCoupons, getCoupon, createCoupon, updateCoupon, deleteCoupon, Coupon } from '@/api/coupons';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -20,10 +20,8 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
-import { Plus, Edit, Trash2 } from 'lucide-react';
+import { Plus, Edit, Trash2, ToggleLeft, ToggleRight } from 'lucide-react';
 
 const Coupons = () => {
   const [coupons, setCoupons] = useState<Coupon[]>([]);
@@ -32,14 +30,11 @@ const Coupons = () => {
   const [editingCoupon, setEditingCoupon] = useState<Coupon | null>(null);
   const [formData, setFormData] = useState({
     code: '',
-    discountType: 'percentage' as DiscountType,
-    discountValue: 0,
-    appliesTo: 'store' as AppliesTo,
-    targetIds: [] as string[],
-    minPurchase: 0,
-    expiryDate: '',
-    active: true,
+    discount_percent: '',
+    valid_until: '',
+    is_active: true,
   });
+
   const { toast } = useToast();
 
   useEffect(() => {
@@ -49,8 +44,8 @@ const Coupons = () => {
   const fetchCoupons = async () => {
     try {
       const response = await getCoupons();
-      setCoupons(response.data.filter(c => !c.deleted));
-    } catch (error) {
+      setCoupons(response.data || []);
+    } catch {
       toast({
         title: 'Error',
         description: 'Failed to load coupons',
@@ -64,17 +59,25 @@ const Coupons = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      const payload = {
+        code: formData.code,
+        discount_percent: parseFloat(formData.discount_percent) || 0,
+        is_active: formData.is_active,
+        valid_until: formData.valid_until || null,
+      };
+
       if (editingCoupon) {
-        await updateCoupon(editingCoupon.id, formData);
+        await updateCoupon(editingCoupon.id, payload);
         toast({ title: 'Success', description: 'Coupon updated successfully' });
       } else {
-        await createCoupon(formData);
+        await createCoupon(payload);
         toast({ title: 'Success', description: 'Coupon created successfully' });
       }
       setDialogOpen(false);
-      fetchCoupons();
       resetForm();
+      fetchCoupons();
     } catch (error) {
+      console.error('Submit error:', error);
       toast({
         title: 'Error',
         description: 'Failed to save coupon',
@@ -83,11 +86,51 @@ const Coupons = () => {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Delete this coupon?')) return;
+  const handleToggleStatus = async (coupon: Coupon) => {
+    const newStatus = !coupon.is_active;
+
+    // Optimistic update
+    setCoupons(prevCoupons =>
+      prevCoupons.map(c =>
+        c.id === coupon.id ? { ...c, is_active: newStatus } : c
+      )
+    );
+
     try {
-      await deleteCoupon(id);
-      toast({ title: 'Success', description: 'Coupon deleted' });
+      await updateCoupon(coupon.id, { is_active: newStatus });
+      toast({
+        title: 'Success',
+        description: `Coupon marked as ${newStatus ? 'active' : 'inactive'}`,
+      });
+
+      if (editingCoupon && editingCoupon.id === coupon.id) {
+        setEditingCoupon({ ...editingCoupon, is_active: newStatus });
+        setFormData(prev => ({ ...prev, is_active: newStatus }));
+      }
+    } catch (error) {
+      console.error('Toggle error:', error);
+
+      // Revert on error
+      setCoupons(prevCoupons =>
+        prevCoupons.map(c =>
+          c.id === coupon.id ? { ...c, is_active: !newStatus } : c
+        )
+      );
+
+      toast({
+        title: 'Error',
+        description: 'Failed to update coupon status',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleDelete = async (coupon: Coupon) => {
+    if (!confirm(`Delete coupon "${coupon.code}"?`)) return;
+
+    try {
+      await deleteCoupon(coupon.id);
+      toast({ title: 'Success', description: 'Coupon deleted successfully' });
       fetchCoupons();
     } catch (error) {
       toast({
@@ -98,49 +141,71 @@ const Coupons = () => {
     }
   };
 
-  const openEditDialog = (coupon: Coupon) => {
+  const openEditDialog = async (coupon: Coupon) => {
     setEditingCoupon(coupon);
-    setFormData({
-      code: coupon.code,
-      discountType: coupon.discountType,
-      discountValue: coupon.discountValue,
-      appliesTo: coupon.appliesTo,
-      targetIds: coupon.targetIds || [],
-      minPurchase: coupon.minPurchase || 0,
-      expiryDate: coupon.expiryDate || '',
-      active: coupon.active,
-    });
-    setDialogOpen(true);
+    try {
+      const fullCoupon = await getCoupon(coupon.id);
+      setEditingCoupon(fullCoupon);
+      
+      // Format date for input type="date" (YYYY-MM-DD)
+      const formattedDate = fullCoupon.valid_until 
+        ? fullCoupon.valid_until.split('T')[0] 
+        : '';
+
+      setFormData({
+        code: fullCoupon.code,
+        discount_percent: String(fullCoupon.discount_percent),
+        valid_until: formattedDate,
+        is_active: fullCoupon.is_active ?? true,
+      });
+      setDialogOpen(true);
+    } catch {
+      toast({
+        title: 'Error',
+        description: 'Failed to load coupon details',
+        variant: 'destructive',
+      });
+      setEditingCoupon(null);
+    }
   };
 
   const resetForm = () => {
     setEditingCoupon(null);
     setFormData({
       code: '',
-      discountType: 'percentage',
-      discountValue: 0,
-      appliesTo: 'store',
-      targetIds: [],
-      minPurchase: 0,
-      expiryDate: '',
-      active: true,
+      discount_percent: '',
+      valid_until: '',
+      is_active: true,
     });
   };
 
+  const formatDate = (dateString: string | null) => {
+    if (!dateString) return 'No expiry';
+    return new Date(dateString).toLocaleDateString('en-IN', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
+  };
+
+  const isExpired = (dateString: string | null) => {
+    if (!dateString) return false;
+    return new Date(dateString) < new Date();
+  };
+
   if (loading) {
-    return <div>Loading...</div>;
+    return <div className="flex items-center justify-center min-h-[400px]">Loading...</div>;
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Coupons</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Coupons</h1>
           <p className="text-muted-foreground">Create and manage discount codes</p>
         </div>
         <Button onClick={() => { resetForm(); setDialogOpen(true); }}>
-          <Plus className="mr-2 h-4 w-4" />
-          Add Coupon
+          <Plus className="mr-2 h-4 w-4" /> Add Coupon
         </Button>
       </div>
 
@@ -154,9 +219,7 @@ const Coupons = () => {
               <TableRow>
                 <TableHead>Code</TableHead>
                 <TableHead>Discount</TableHead>
-                <TableHead>Applies To</TableHead>
-                <TableHead>Min. Purchase</TableHead>
-                <TableHead>Expiry</TableHead>
+                <TableHead>Valid Until</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
@@ -165,41 +228,83 @@ const Coupons = () => {
               {coupons.map((coupon) => (
                 <TableRow key={coupon.id}>
                   <TableCell className="font-medium font-mono">{coupon.code}</TableCell>
-                  <TableCell>
-                    {coupon.discountType === 'percentage'
-                      ? `${coupon.discountValue}%`
-                      : `$${coupon.discountValue}`}
-                  </TableCell>
-                  <TableCell className="capitalize">{coupon.appliesTo}</TableCell>
-                  <TableCell>${coupon.minPurchase || 0}</TableCell>
-                  <TableCell>
-                    {coupon.expiryDate
-                      ? new Date(coupon.expiryDate).toLocaleDateString()
-                      : 'No expiry'}
+                  <TableCell className="text-green-600 font-semibold">
+                    {coupon.discount_percent}% OFF
                   </TableCell>
                   <TableCell>
-                    <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${
-                      coupon.active ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'
-                    }`}>
-                      {coupon.active ? 'Active' : 'Inactive'}
+                    <div className="flex flex-col">
+                      <span className={isExpired(coupon.valid_until) ? 'text-red-600' : ''}>
+                        {formatDate(coupon.valid_until)}
+                      </span>
+                      {isExpired(coupon.valid_until) && (
+                        <span className="text-xs text-red-500">Expired</span>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <span className={
+                      `inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${
+                        coupon.is_active
+                          ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+                          : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+                      }`
+                    }>
+                      {coupon.is_active ? 'Active' : 'Inactive'}
                     </span>
                   </TableCell>
-                  <TableCell className="text-right">
-                    <Button variant="ghost" size="icon" onClick={() => openEditDialog(coupon)}>
+                  <TableCell className="text-right space-x-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => openEditDialog(coupon)}
+                      title="Edit coupon"
+                    >
                       <Edit className="h-4 w-4" />
                     </Button>
-                    <Button variant="ghost" size="icon" onClick={() => handleDelete(coupon.id)}>
-                      <Trash2 className="h-4 w-4 text-destructive" />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleToggleStatus(coupon)}
+                      title={coupon.is_active ? 'Deactivate coupon' : 'Activate coupon'}
+                      className={
+                        coupon.is_active
+                          ? 'hover:bg-green-500/10 text-green-600 hover:text-green-700'
+                          : 'hover:bg-red-500/10 text-red-600 hover:text-red-700'
+                      }
+                    >
+                      {coupon.is_active
+                        ? <ToggleRight className="h-5 w-5" />
+                        : <ToggleLeft className="h-5 w-5" />}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleDelete(coupon)}
+                      title="Delete coupon"
+                      className="hover:bg-red-500/10 text-red-600 hover:text-red-700"
+                    >
+                      <Trash2 className="h-4 w-4" />
                     </Button>
                   </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
+          {coupons.length === 0 && (
+            <div className="text-center py-12">
+              <p className="text-muted-foreground">No coupons found.</p>
+            </div>
+          )}
         </CardContent>
       </Card>
 
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <Dialog
+        open={dialogOpen}
+        onOpenChange={(open) => {
+          setDialogOpen(open);
+          if (!open) resetForm();
+        }}
+      >
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>{editingCoupon ? 'Edit Coupon' : 'Create New Coupon'}</DialogTitle>
@@ -207,95 +312,73 @@ const Coupons = () => {
               {editingCoupon ? 'Update coupon details' : 'Create a new discount coupon'}
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={handleSubmit}>
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="code">Coupon Code</Label>
-                  <Input
-                    id="code"
-                    value={formData.code}
-                    onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
-                    placeholder="SAVE20"
-                    required
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="discountType">Discount Type</Label>
-                  <Select value={formData.discountType} onValueChange={(value: DiscountType) => setFormData({ ...formData, discountType: value })}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="percentage">Percentage</SelectItem>
-                      <SelectItem value="fixed">Fixed Amount</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="discountValue">
-                    Discount Value {formData.discountType === 'percentage' ? '(%)' : '($)'}
-                  </Label>
-                  <Input
-                    id="discountValue"
-                    type="number"
-                    step={formData.discountType === 'percentage' ? '1' : '0.01'}
-                    value={formData.discountValue}
-                    onChange={(e) => setFormData({ ...formData, discountValue: parseFloat(e.target.value) })}
-                    required
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="minPurchase">Min. Purchase ($)</Label>
-                  <Input
-                    id="minPurchase"
-                    type="number"
-                    step="0.01"
-                    value={formData.minPurchase}
-                    onChange={(e) => setFormData({ ...formData, minPurchase: parseFloat(e.target.value) })}
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="appliesTo">Applies To</Label>
-                  <Select value={formData.appliesTo} onValueChange={(value: AppliesTo) => setFormData({ ...formData, appliesTo: value })}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="store">Entire Store</SelectItem>
-                      <SelectItem value="category">Specific Categories</SelectItem>
-                      <SelectItem value="products">Specific Products</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label htmlFor="expiryDate">Expiry Date</Label>
-                  <Input
-                    id="expiryDate"
-                    type="date"
-                    value={formData.expiryDate}
-                    onChange={(e) => setFormData({ ...formData, expiryDate: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center space-x-2">
-                <Switch
-                  id="active"
-                  checked={formData.active}
-                  onCheckedChange={(checked) => setFormData({ ...formData, active: checked })}
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label htmlFor="code">Coupon Code *</Label>
+                <Input
+                  id="code"
+                  value={formData.code}
+                  onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
+                  placeholder="SAVE20"
+                  required
+                  className="font-mono"
                 />
-                <Label htmlFor="active">Active</Label>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Will be automatically converted to uppercase
+                </p>
+              </div>
+
+              <div>
+                <Label htmlFor="discount_percent">Discount Percentage * (%)</Label>
+                <Input
+                  id="discount_percent"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="100"
+                  value={formData.discount_percent}
+                  onChange={(e) => setFormData({ ...formData, discount_percent: e.target.value })}
+                  placeholder="10"
+                  required
+                />
               </div>
             </div>
-            <DialogFooter className="mt-6">
-              <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
+
+            <div>
+              <Label htmlFor="valid_until">Valid Until</Label>
+              <Input
+                id="valid_until"
+                type="date"
+                value={formData.valid_until}
+                onChange={(e) => setFormData({ ...formData, valid_until: e.target.value })}
+                min={new Date().toISOString().split('T')[0]}
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Leave empty for no expiry date
+              </p>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                id="is_active"
+                checked={formData.is_active}
+                onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
+                className="rounded"
+              />
+              <Label htmlFor="is_active" className="cursor-pointer">Active</Label>
+            </div>
+
+            <DialogFooter className="gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setDialogOpen(false);
+                  resetForm();
+                }}
+              >
                 Cancel
               </Button>
               <Button type="submit">

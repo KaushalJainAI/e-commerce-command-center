@@ -16,4 +16,7 @@ export interface DashboardStats {
   }>;
 }
 
-export const getDashboardStats = () => api.get<DashboardStats>('/dashboard/stats');
+// Base axios instance should already have baseURL = '/api' (or full backend URL).
+// This call hits: GET /api/dashboard/stats/
+export const getDashboardStats = () =>
+  api.get<DashboardStats>('/dashboard/');
