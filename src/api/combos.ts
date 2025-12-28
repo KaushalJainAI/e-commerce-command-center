@@ -2,23 +2,34 @@
 import api from './axiosInstance';
 
 export interface ComboItem {
-  product: string;        // slug of the product
-  product_name: string;
+  id?: number;
+  product: number;         // product ID
+  product_name?: string;
+  product_slug?: string;
   quantity: number;
 }
 
 export interface Combo {
-  id: string;
+  id: number;
   slug: string;
   name: string;
+  display_title?: string;
+  title?: string;
+  subtitle?: string;
   description?: string;
-  price: string;
-  discount_price?: string;
+  price: number;
+  discount_price?: number;
+  final_price?: number;
+  discount_percentage?: number;
+  total_original_price?: number;
+  total_weight?: string;
   image?: string;
   is_featured?: boolean;
   is_active: boolean;
+  badge?: string;
   created_at?: string;
-  items: ComboItem[];
+  items?: ComboItem[];
+  products?: number[];  // Product IDs in combo
 }
 
 interface PaginatedResponse<T> {
@@ -36,36 +47,26 @@ export const getCombos = async () => {
   return { data };
 };
 
-export const getCombo = async (slug: string) => {
-  const response = await api.get<Combo>(`/combos/${slug}/`);
+export const getCombo = async (slugOrId: string | number) => {
+  const response = await api.get<Combo>(`/combos/${slugOrId}/`);
   return response.data;
 };
 
-// Critical Fix: Proper FormData handling
 export const createCombo = async (formData: FormData) => {
-  const response = await api.post<Combo>('/combos/', formData, {
-    headers: {
-      // DO NOT set Content-Type — let axios add boundary
-    },
-  });
+  const response = await api.post<Combo>('/combos/', formData);
   return response.data;
 };
 
-// Critical Fix: Use PUT for full replacement with FormData
-// In @/api/combos.ts
-export const updateCombo = async (slug: string, data: FormData | Record<string, any>) => {
+export const updateCombo = async (slugOrId: string | number, data: FormData | Partial<Combo>) => {
   const isFormData = data instanceof FormData;
-  
-  const response = await api.patch(`/combos/${slug}/`, data, {
+  const response = await api.patch<Combo>(`/combos/${slugOrId}/`, data, {
     headers: isFormData 
-      ? { 'Content-Type': 'multipart/form-data' }
+      ? {} // Let axios set Content-Type with boundary for FormData
       : { 'Content-Type': 'application/json' },
   });
-  
   return response.data;
 };
 
-
-export const deleteCombo = async (slug: string) => {
-  await api.delete(`/combos/${slug}/`);
+export const deleteCombo = async (slugOrId: string | number) => {
+  await api.delete(`/combos/${slugOrId}/`);
 };

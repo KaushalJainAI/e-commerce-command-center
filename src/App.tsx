@@ -18,6 +18,7 @@ import ShippingPolicy from "./pages/ShippingPolicy";
 import ReturnPolicy from "./pages/ReturnPolicy";
 import AdminInfo from "./pages/AdminInfo";
 import ChatSupport from "./pages/ChatSupport";
+import ContactSubmissions from "./pages/ContactSubmissions";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -43,13 +44,14 @@ const App = () => (
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="products" element={<Products />} />
               <Route path="combos" element={<Combos />} />
-              <Route path="graph" element={<ProductGraph />} />
+              {/* <Route path="graph" element={<ProductGraph />} /> */}
               <Route path="orders" element={<Orders />} />
               {/* <Route path="recycle-bin" element={<RecycleBin />} /> */}
               <Route path="coupons" element={<Coupons />} />
               <Route path="shipping-policy" element={<ShippingPolicy />} />
               <Route path="return-policy" element={<ReturnPolicy />} />
               <Route path="admin-info" element={<AdminInfo />} />
+              <Route path="contact" element={<ContactSubmissions />} />
               <Route path="chat" element={<ChatSupport />} />
             </Route>
             <Route path="*" element={<NotFound />} />

@@ -1,22 +1,23 @@
 import api from './axiosInstance';
 
+export interface RecentOrder {
+  id: number;
+  customerName: string;
+  totalAmount: number;
+  status: string;
+  createdAt: string;
+}
+
 export interface DashboardStats {
   totalProducts: number;
   totalCombos: number;
   totalOrders: number;
   activeCoupons: number;
   graphNodesCount: number;
-  graphEdgesCount: number;
-  recentOrders: Array<{
-    id: string;
-    customerName: string;
-    totalAmount: number;
-    status: string;
-    createdAt: string;
-  }>;
+  graphEdgesCount: number;  // Note: backend returns graphEdgeCount (no 's')
+  recentOrders: RecentOrder[];
 }
 
-// Base axios instance should already have baseURL = '/api' (or full backend URL).
-// This call hits: GET /api/dashboard/stats/
+// Fetch dashboard statistics
 export const getDashboardStats = () =>
   api.get<DashboardStats>('/dashboard/');

@@ -81,7 +81,7 @@ const Dashboard = () => {
                     </p>
                   </div>
                   <div className="text-right">
-                    <p className="font-medium">${order.totalAmount.toFixed(2)}</p>
+                    <p className="font-medium">₹{Number(order.totalAmount).toFixed(2)}</p>
                     <span className="inline-flex items-center rounded-full bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
                       {order.status}
                     </span>

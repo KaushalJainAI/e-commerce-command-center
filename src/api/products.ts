@@ -9,14 +9,14 @@ export interface ProductImage {
 }
 
 export interface Product {
-  id: string;
+  id: number;
   slug: string;
   name: string;
   category: number;
   category_name?: string;
   spice_form: string;
-  price: string;
-  discount_price?: string;
+  price: number;
+  discount_price?: number;
   final_price?: number;
   discount_percentage?: number;
   stock: number;
@@ -51,8 +51,8 @@ export const getProducts = async () => {
   return { data };
 };
 
-export const getProduct = async (slug: string) => {
-  const response = await api.get<Product>(`/products/${slug}/`);
+export const getProduct = async (slugOrId: string | number) => {
+  const response = await api.get<Product>(`/products/${slugOrId}/`);
   return response.data;
 };
 
@@ -61,9 +61,13 @@ export const createProduct = async (data: FormData) => {
   return response.data;
 };
 
-export const updateProduct = async (slug: string, data: FormData | any) => {
-  const response = await api.patch<Product>(`/products/${slug}/`, data);
+export const updateProduct = async (slugOrId: string | number, data: FormData | Partial<Product>) => {
+  const response = await api.patch<Product>(`/products/${slugOrId}/`, data);
   return response.data;
+};
+
+export const deleteProduct = async (slugOrId: string | number) => {
+  await api.delete(`/products/${slugOrId}/`);
 };
 
 export const getSpiceForms = async () => {
@@ -71,7 +75,7 @@ export const getSpiceForms = async () => {
   return response.data;
 };
 
-export const createProductImage = async (productId: string | number, image: File, altText: string) => {
+export const createProductImage = async (productId: number, image: File, altText: string) => {
   const formData = new FormData();
   formData.append('product', String(productId));
   formData.append('image', image);

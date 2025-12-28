@@ -1,9 +1,19 @@
 import api from './axiosInstance';
 
+// Matches backend UserSerializer fields
 export interface AdminInfo {
-  name: string;
+  id: number;
+  username: string;
   email: string;
-  profileImage?: string;
+  first_name: string;
+  last_name: string;
+  phone: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  pincode?: string;
+  profile_picture?: string;
+  created_at?: string;
 }
 
 export interface LoginCredentials {
@@ -15,14 +25,29 @@ export interface LoginCredentials {
 export interface LoginResponse {
   access: string;
   refresh: string;
+  user?: {
+    id: number;
+    email: string;
+    first_name?: string;
+    last_name?: string;
+    is_staff: boolean;
+    is_superuser: boolean;
+  };
 }
 
-// Call your Django JWT endpoint
+// Call Django JWT endpoint
 export const login = (credentials: LoginCredentials) =>
   api.post<LoginResponse>('/auth/login/', credentials);
 
-// These endpoints should be protected; axiosInstance should attach the token
-export const getAdminInfo = () => api.get<AdminInfo>('/admin/info');
+// Get admin profile (uses auth/profile endpoint)
+export const getAdminInfo = () => api.get<AdminInfo>('/auth/profile/');
 
+// Update admin profile
 export const updateAdminInfo = (data: Partial<AdminInfo> & { password?: string }) =>
-  api.put<AdminInfo>('/admin/info', data);
+  api.patch<AdminInfo>('/auth/profile/', data);
+
+// Logout (just clears tokens on frontend)
+export const logout = () => {
+  localStorage.removeItem('admin_token');
+  localStorage.removeItem('refresh_token');
+};

@@ -4,12 +4,14 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
-import { Save } from 'lucide-react';
+import { Save, AlertCircle } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 const ReturnPolicy = () => {
   const [content, setContent] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [notConfigured, setNotConfigured] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -19,25 +21,42 @@ const ReturnPolicy = () => {
   const fetchPolicy = async () => {
     try {
       const response = await getPolicy('return');
-      setContent(response.data.content);
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: 'Failed to load return policy',
-        variant: 'destructive',
-      });
+      setContent(response.data.content || '');
+      setNotConfigured(false);
+    } catch (error: any) {
+      // Check if it's a 404 (policy not configured)
+      if (error?.response?.status === 404) {
+        setNotConfigured(true);
+        setContent('');
+      } else {
+        toast({
+          title: 'Error',
+          description: 'Failed to load return policy',
+          variant: 'destructive',
+        });
+      }
     } finally {
       setLoading(false);
     }
   };
 
   const handleSave = async () => {
+    if (!content.trim()) {
+      toast({
+        title: 'Error',
+        description: 'Policy content cannot be empty',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setSaving(true);
     try {
       await updatePolicy('return', content);
+      setNotConfigured(false);
       toast({
         title: 'Success',
-        description: 'Return policy updated successfully',
+        description: notConfigured ? 'Return policy created successfully' : 'Return policy updated successfully',
       });
     } catch (error) {
       toast({
@@ -63,9 +82,19 @@ const ReturnPolicy = () => {
         </div>
         <Button onClick={handleSave} disabled={saving}>
           <Save className="mr-2 h-4 w-4" />
-          {saving ? 'Saving...' : 'Save Changes'}
+          {saving ? 'Saving...' : notConfigured ? 'Create Policy' : 'Save Changes'}
         </Button>
       </div>
+
+      {notConfigured && (
+        <Alert>
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Policy Not Configured</AlertTitle>
+          <AlertDescription>
+            No return policy has been created yet. Enter your policy content below and click "Create Policy" to set it up.
+          </AlertDescription>
+        </Alert>
+      )}
 
       <Card>
         <CardHeader>

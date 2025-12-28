@@ -7,12 +7,12 @@ import {
   Layers,
   Network,
   ShoppingCart,
-  Trash2,
   Ticket,
   Truck,
   RotateCcw,
   User,
   MessageSquare,
+  Mail,
   LogOut,
 } from 'lucide-react';
 import {
@@ -32,32 +32,44 @@ const menuItems = [
   { title: 'Dashboard', url: '/dashboard', icon: LayoutDashboard },
   { title: 'Products', url: '/products', icon: Package },
   { title: 'Combos', url: '/combos', icon: Layers },
-  { title: 'Product Graph', url: '/graph', icon: Network },
   { title: 'Orders', url: '/orders', icon: ShoppingCart },
-  { title: 'Recycle Bin', url: '/recycle-bin', icon: Trash2 },
   { title: 'Coupons', url: '/coupons', icon: Ticket },
   { title: 'Shipping Policy', url: '/shipping-policy', icon: Truck },
   { title: 'Return Policy', url: '/return-policy', icon: RotateCcw },
   { title: 'Admin Info', url: '/admin-info', icon: User },
+  { title: 'Contact', url: '/contact', icon: Mail },
   { title: 'Chat Support', url: '/chat', icon: MessageSquare },
 ];
 
 export function AdminSidebar() {
   const { state } = useSidebar();
   const location = useLocation();
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const currentPath = location.pathname;
 
   const isActive = (path: string) => currentPath === path;
   const isCollapsed = state === 'collapsed';
 
+  // Get display name from user profile
+  const displayName = user 
+    ? (user.first_name && user.last_name 
+        ? `${user.first_name} ${user.last_name}` 
+        : user.username || user.email)
+    : 'Admin';
+
   return (
     <Sidebar className="transition-all duration-300">
       <SidebarContent>
-        <div className="p-4">
+        <div className="p-4 border-b">
           <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+              <User className="h-5 w-5 text-primary" />
+            </div>
             {!isCollapsed && (
-              <h1 className="text-xl font-bold text-sidebar-foreground">Admin Panel</h1>
+              <div className="min-w-0">
+                <p className="font-semibold text-sm truncate">{displayName}</p>
+                <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
+              </div>
             )}
           </div>
         </div>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getProducts, getProduct, createProduct, updateProduct, Product } from '@/api/products';
+import { getProducts, getProduct, createProduct, updateProduct, Product, ProductImage, createProductImage, deleteProductImage } from '@/api/products';
 import { getCategories, Category } from '@/api/categories';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,7 +10,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { Plus, Edit, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Plus, Edit, ToggleLeft, ToggleRight, X, ImagePlus, Loader2 } from 'lucide-react';
 
 const Products = () => {
   const [products, setProducts] = useState<Product[]>([]);
@@ -37,6 +37,11 @@ const Products = () => {
   });
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  
+  // Gallery images state
+  const [galleryImages, setGalleryImages] = useState<ProductImage[]>([]);
+  const [newGalleryImages, setNewGalleryImages] = useState<{ file: File; preview: string }[]>([]);
+  const [uploadingGallery, setUploadingGallery] = useState(false);
 
   const { toast } = useToast();
 
@@ -105,13 +110,23 @@ const Products = () => {
     e.preventDefault();
     try {
       const form = buildFormData();
+      let productId: number;
+      
       if (editingProduct) {
         await updateProduct(editingProduct.slug, form);
+        productId = editingProduct.id;
         toast({ title: 'Success', description: 'Product updated successfully' });
       } else {
-        await createProduct(form);
+        const newProduct = await createProduct(form);
+        productId = newProduct.id;
         toast({ title: 'Success', description: 'Product created successfully' });
       }
+      
+      // Upload gallery images if any
+      if (newGalleryImages.length > 0) {
+        await uploadGalleryImages(productId);
+      }
+      
       setDialogOpen(false);
       resetForm();
       fetchProducts();
@@ -193,6 +208,9 @@ const Products = () => {
       });
       setImageFile(null);
       setImagePreview(fullProduct.image || null);
+      // Set gallery images from product
+      setGalleryImages(fullProduct.images || []);
+      setNewGalleryImages([]);
       setDialogOpen(true);
     } catch {
       toast({
@@ -225,6 +243,9 @@ const Products = () => {
     });
     setImageFile(null);
     setImagePreview(null);
+    // Reset gallery images
+    setGalleryImages([]);
+    setNewGalleryImages([]);
   };
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -232,6 +253,62 @@ const Products = () => {
     if (!file) return;
     setImageFile(file);
     setImagePreview(URL.createObjectURL(file));
+  };
+
+  // Gallery image handlers
+  const handleGalleryImageAdd = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    
+    const newImages = Array.from(files).map(file => ({
+      file,
+      preview: URL.createObjectURL(file)
+    }));
+    setNewGalleryImages(prev => [...prev, ...newImages]);
+    // Reset input so same file can be selected again
+    e.target.value = '';
+  };
+
+  const handleRemoveNewGalleryImage = (index: number) => {
+    setNewGalleryImages(prev => {
+      // Revoke URL to prevent memory leak
+      URL.revokeObjectURL(prev[index].preview);
+      return prev.filter((_, i) => i !== index);
+    });
+  };
+
+  const handleDeleteExistingGalleryImage = async (imageId: number) => {
+    try {
+      await deleteProductImage(imageId);
+      setGalleryImages(prev => prev.filter(img => img.id !== imageId));
+      toast({ title: 'Success', description: 'Gallery image deleted' });
+    } catch {
+      toast({
+        title: 'Error',
+        description: 'Failed to delete gallery image',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const uploadGalleryImages = async (productId: number) => {
+    if (newGalleryImages.length === 0) return;
+    
+    setUploadingGallery(true);
+    try {
+      for (const img of newGalleryImages) {
+        await createProductImage(productId, img.file, '');
+      }
+      toast({ title: 'Success', description: `${newGalleryImages.length} gallery image(s) uploaded` });
+    } catch {
+      toast({
+        title: 'Error',
+        description: 'Some gallery images failed to upload',
+        variant: 'destructive',
+      });
+    } finally {
+      setUploadingGallery(false);
+    }
   };
 
   const formatMoney = (value: string | number | undefined) => {
@@ -261,8 +338,8 @@ const Products = () => {
         <CardHeader>
           <CardTitle>All Products</CardTitle>
         </CardHeader>
-        <CardContent>
-          <Table>
+        <CardContent className="overflow-x-auto">
+          <Table className="min-w-[600px]">
             <TableHeader>
               <TableRow>
                 <TableHead>Image</TableHead>
@@ -541,6 +618,83 @@ const Products = () => {
                   placeholder="Turmeric, Salt"
                 />
               </div>
+            </div>
+
+            {/* Gallery Images Section */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label>Gallery Images</Label>
+                <label className="cursor-pointer">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    onChange={handleGalleryImageAdd}
+                    className="hidden"
+                  />
+                  <Button type="button" variant="outline" size="sm" asChild>
+                    <span><ImagePlus className="mr-2 h-4 w-4" /> Add Images</span>
+                  </Button>
+                </label>
+              </div>
+              
+              {/* Image Grid */}
+              <div className="grid grid-cols-4 gap-3">
+                {/* Existing gallery images */}
+                {galleryImages.map((img) => (
+                  <div key={img.id} className="relative group">
+                    <img
+                      src={img.image}
+                      alt={img.alt_text || 'Gallery image'}
+                      className="h-24 w-full object-cover rounded-lg border"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteExistingGalleryImage(img.id)}
+                      className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Delete image"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+                
+                {/* New images to upload */}
+                {newGalleryImages.map((img, index) => (
+                  <div key={`new-${index}`} className="relative group">
+                    <img
+                      src={img.preview}
+                      alt={`New image ${index + 1}`}
+                      className="h-24 w-full object-cover rounded-lg border border-dashed border-primary"
+                    />
+                    <div className="absolute inset-0 bg-primary/10 rounded-lg flex items-center justify-center">
+                      <span className="text-xs font-medium text-primary">New</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveNewGalleryImage(index)}
+                      className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                      title="Remove image"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+                
+                {/* Empty state */}
+                {galleryImages.length === 0 && newGalleryImages.length === 0 && (
+                  <div className="col-span-4 text-center py-6 text-muted-foreground text-sm border rounded-lg border-dashed">
+                    No gallery images. Click "Add Images" to upload.
+                  </div>
+                )}
+              </div>
+              
+              {uploadingGallery && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Uploading gallery images...
+                </div>
+              )}
             </div>
 
             <div className="flex gap-6">
