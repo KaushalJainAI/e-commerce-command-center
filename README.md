@@ -1,73 +1,110 @@
-# Welcome to your Lovable project
+# 🎛️ NGU Spices - Admin Panel
 
-## Project info
+A React + TypeScript dashboard for managing the NGU Spices e-commerce platform.
 
-**URL**: https://lovable.dev/projects/5e712fc9-8ea6-4133-b6ae-58fa8b7d767f
+## ✨ Features
 
-## How can I edit this code?
+- **Dashboard** - Sales overview, recent orders, stats
+- **Products** - CRUD operations, gallery images, stock
+- **Combos** - Create/manage product combos
+- **Categories** - Organize products
+- **Orders** - View, update status, manage deliveries
+- **Coupons** - Create discount codes
+- **Policies** - Edit shipping/return policies
+- **Chat Support** - Respond to customer inquiries
+- **Contact Submissions** - View contact form entries
 
-There are several ways of editing your application.
+## 🛠️ Tech Stack
 
-**Use Lovable**
+| Technology | Purpose |
+|------------|---------|
+| React 18 | UI framework |
+| TypeScript | Type safety |
+| Vite | Build tool |
+| TailwindCSS | Styling |
+| Shadcn/UI | Component library |
+| React Router | Navigation |
+| Axios | API calls |
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/5e712fc9-8ea6-4133-b6ae-58fa8b7d767f) and start prompting.
+## 📦 Project Structure
 
-Changes made via Lovable will be committed automatically to this repo.
+```
+src/
+├── components/     # UI components
+├── pages/          # Admin pages
+├── api/            # API client functions
+├── contexts/       # Auth context
+└── hooks/          # Custom hooks
+```
 
-**Use your preferred IDE**
+## 🚀 Quick Start
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+### Development
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+```bash
+# Install dependencies
+npm install
 
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
+# Start dev server
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+Open [http://localhost:5173](http://localhost:5173)
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+### Build for Production
 
-**Use GitHub Codespaces**
+```bash
+npm run build
+```
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+### Docker
 
-## What technologies are used for this project?
+```bash
+docker build -t ngu-admin .
+docker run -p 3001:80 ngu-admin
+```
 
-This project is built with:
+## 🔧 Environment Variables
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+Create `.env.local`:
 
-## How can I deploy this project?
+```env
+VITE_API_URL=http://localhost:8000/api
+```
 
-Simply open [Lovable](https://lovable.dev/projects/5e712fc9-8ea6-4133-b6ae-58fa8b7d767f) and click on Share -> Publish.
+## 📱 Pages
 
-## Can I connect a custom domain to my Lovable project?
+| Route | Page | Description |
+|-------|------|-------------|
+| `/` | Dashboard | Stats overview |
+| `/products` | Products | Manage products + gallery |
+| `/combos` | Combos | Manage combos |
+| `/orders` | Orders | Order management |
+| `/coupons` | Coupons | Discount codes |
+| `/chat` | Chat Support | Customer messages |
+| `/contact` | Contact | Form submissions |
+| `/shipping-policy` | Shipping | Edit shipping policy |
+| `/return-policy` | Returns | Edit return policy |
+| `/admin-info` | Admin Info | Account settings |
+| `/login` | Login | Admin authentication |
 
-Yes, you can!
+## 🔐 Access Control
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+All pages require admin authentication (`is_staff=True`).
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+## 🎨 UI Features
+
+- **Dark Mode** - Easy on the eyes
+- **Responsive** - Works on tablets
+- **Tables** - Sortable, searchable
+- **Forms** - Validation, file uploads
+- **Toasts** - Success/error feedback
+- **Modals** - Edit dialogs
+
+## 🚢 Deployment
+
+See [DEPLOYMENT.md](../../DEPLOYMENT.md) for EC2 deployment instructions.
+
+---
+
+Made with ❤️ for NGU Spices
