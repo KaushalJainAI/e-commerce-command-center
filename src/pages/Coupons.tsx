@@ -76,11 +76,11 @@ const Coupons = () => {
       setDialogOpen(false);
       resetForm();
       fetchCoupons();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Submit error:', error);
       toast({
         title: 'Error',
-        description: 'Failed to save coupon',
+        description: error.message || 'Failed to save coupon',
         variant: 'destructive',
       });
     }
@@ -199,7 +199,7 @@ const Coupons = () => {
 
   return (
     <div className="space-y-6 p-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Coupons</h1>
           <p className="text-muted-foreground">Create and manage discount codes</p>
@@ -213,8 +213,8 @@ const Coupons = () => {
         <CardHeader>
           <CardTitle>All Coupons</CardTitle>
         </CardHeader>
-        <CardContent>
-          <Table>
+        <CardContent className="overflow-x-auto">
+          <Table className="min-w-[500px]">
             <TableHeader>
               <TableRow>
                 <TableHead>Code</TableHead>
@@ -313,7 +313,7 @@ const Coupons = () => {
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="code">Coupon Code *</Label>
                 <Input

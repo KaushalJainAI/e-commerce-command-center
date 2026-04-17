@@ -23,3 +23,10 @@ dist-ssr
 *.sln
 *.sw?
 .env
+.env.*
+
+# Sensitive credentials
+*.pem
+*.csv
+*.key
+

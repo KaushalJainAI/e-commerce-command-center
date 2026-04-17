@@ -160,7 +160,7 @@ const ContactSubmissions = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold">Contact Submissions</h1>
           <p className="text-muted-foreground">
@@ -264,7 +264,7 @@ const ContactSubmissions = () => {
           </DialogHeader>
           {viewingSubmission && (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <Label className="text-muted-foreground">Email</Label>
                   <p className="font-medium">{viewingSubmission.email}</p>

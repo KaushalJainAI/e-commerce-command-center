@@ -23,6 +23,8 @@ export interface Combo {
   discount_percentage?: number;
   total_original_price?: number;
   total_weight?: string;
+  weight?: number;
+  unit?: string;
   image?: string;
   is_featured?: boolean;
   is_active: boolean;

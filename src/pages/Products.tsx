@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getProducts, getProduct, createProduct, updateProduct, Product, ProductImage, createProductImage, deleteProductImage } from '@/api/products';
+import { getProducts, getProduct, createProduct, updateProduct, Product, ProductImage, createProductImage, deleteProductImage, getSpiceForms } from '@/api/products';
 import { getCategories, Category } from '@/api/categories';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -15,12 +15,12 @@ import { Plus, Edit, ToggleLeft, ToggleRight, X, ImagePlus, Loader2 } from 'luci
 const Products = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [spiceForms, setSpiceForms] = useState<{ value: string; label: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [formData, setFormData] = useState({
     name: '',
-    slug: '',
     description: '',
     category: '',
     spice_form: '',
@@ -28,6 +28,7 @@ const Products = () => {
     discount_price: '',
     stock: '',
     weight: '',
+    unit: 'g',
     origin_country: '',
     organic: false,
     shelf_life: '',
@@ -35,6 +36,7 @@ const Products = () => {
     is_active: true,
     is_featured: false,
   });
+  const [submitting, setSubmitting] = useState(false);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   
@@ -48,12 +50,14 @@ const Products = () => {
   useEffect(() => {
     const init = async () => {
       try {
-        const [productsRes, categoriesRes] = await Promise.all([
+        const [productsRes, categoriesRes, spiceFormsRes] = await Promise.all([
           getProducts(),
           getCategories(),
+          getSpiceForms(),
         ]);
         setProducts(productsRes.data || []);
         setCategories(categoriesRes.data || []);
+        setSpiceForms(spiceFormsRes || []);
       } catch {
         toast({
           title: 'Error',
@@ -88,14 +92,14 @@ const Products = () => {
   const buildFormData = () => {
     const form = new FormData();
     form.append('name', formData.name);
-    if (formData.slug) form.append('slug', formData.slug);
     if (formData.description) form.append('description', formData.description);
     if (formData.category) form.append('category', formData.category);
     if (formData.spice_form) form.append('spice_form', formData.spice_form);
     form.append('price', String(parseNumberOrZero(formData.price)));
     if (formData.discount_price) form.append('discount_price', String(parseNumberOrZero(formData.discount_price)));
     form.append('stock', String(parseInt(formData.stock) || 0));
-    if (formData.weight) form.append('weight', formData.weight);
+    form.append('weight', String(parseNumberOrZero(formData.weight)));
+    form.append('unit', formData.unit);
     if (formData.origin_country) form.append('origin_country', formData.origin_country);
     form.append('organic', String(formData.organic));
     if (formData.shelf_life) form.append('shelf_life', formData.shelf_life);
@@ -108,6 +112,7 @@ const Products = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitting(true);
     try {
       const form = buildFormData();
       let productId: number;
@@ -117,6 +122,16 @@ const Products = () => {
         productId = editingProduct.id;
         toast({ title: 'Success', description: 'Product updated successfully' });
       } else {
+        // Basic frontend validation for required fields
+        if (!imageFile) {
+          toast({
+            title: 'Image Required',
+            description: 'Please upload a product image for new products.',
+            variant: 'destructive',
+          });
+          return;
+        }
+        
         const newProduct = await createProduct(form);
         productId = newProduct.id;
         toast({ title: 'Success', description: 'Product created successfully' });
@@ -130,13 +145,15 @@ const Products = () => {
       setDialogOpen(false);
       resetForm();
       fetchProducts();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Submit error:', error);
       toast({
         title: 'Error',
-        description: 'Failed to save product',
+        description: error.message || 'Failed to save product',
         variant: 'destructive',
       });
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -166,7 +183,7 @@ const Products = () => {
         setEditingProduct({ ...editingProduct, is_active: newStatus });
         setFormData(prev => ({ ...prev, is_active: newStatus }));
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Toggle error:', error);
       
       // Revert optimistic update on error
@@ -178,7 +195,7 @@ const Products = () => {
       
       toast({
         title: 'Error',
-        description: 'Failed to update product status',
+        description: error.message || 'Failed to update product status',
         variant: 'destructive',
       });
     }
@@ -191,14 +208,14 @@ const Products = () => {
       setEditingProduct(fullProduct);
       setFormData({
         name: fullProduct.name,
-        slug: fullProduct.slug,
         description: fullProduct.description || '',
         category: String(fullProduct.category),
         spice_form: fullProduct.spice_form || '',
-        price: fullProduct.price ?? '',
-        discount_price: fullProduct.discount_price ?? '',
+        price: fullProduct.price !== undefined && fullProduct.price !== null ? String(fullProduct.price) : '',
+        discount_price: fullProduct.discount_price !== undefined && fullProduct.discount_price !== null ? String(fullProduct.discount_price) : '',
         stock: String(fullProduct.stock ?? 0),
-        weight: fullProduct.weight || '',
+        weight: fullProduct.weight !== undefined && fullProduct.weight !== null ? String(fullProduct.weight) : '',
+        unit: fullProduct.unit || 'g',
         origin_country: fullProduct.origin_country || 'India',
         organic: fullProduct.organic || false,
         shelf_life: fullProduct.shelf_life || '',
@@ -226,7 +243,6 @@ const Products = () => {
     setEditingProduct(null);
     setFormData({
       name: '',
-      slug: '',
       description: '',
       category: '',
       spice_form: '',
@@ -234,6 +250,7 @@ const Products = () => {
       discount_price: '',
       stock: '',
       weight: '',
+      unit: 'g',
       origin_country: '',
       organic: false,
       shelf_life: '',
@@ -324,7 +341,7 @@ const Products = () => {
 
   return (
     <div className="space-y-6 p-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Products</h1>
           <p className="text-muted-foreground">Manage your product inventory</p>
@@ -346,6 +363,7 @@ const Products = () => {
                 <TableHead>Name</TableHead>
                 <TableHead>Category</TableHead>
                 <TableHead>Price</TableHead>
+                <TableHead>Weight</TableHead>
                 <TableHead>Stock</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -377,6 +395,9 @@ const Products = () => {
                       ) : (
                         `₹${price}`
                       )}
+                    </TableCell>
+                    <TableCell className="font-mono text-muted-foreground">
+                      {product.weight ? `${product.weight}${product.unit || ''}` : '—'}
                     </TableCell>
                     <TableCell>
                       <span className={`${product.stock && product.stock > 0 ? 'text-green-600' : 'text-red-600'}`}>
@@ -455,20 +476,21 @@ const Products = () => {
                   <span className="text-xs text-muted-foreground text-center px-2">No image</span>
                 )}
               </div>
-              <div className="space-y-1">
-                <Label htmlFor="image">Product image</Label>
+               <div className="space-y-1">
+                <Label htmlFor="image">Product image {!editingProduct && '*'}</Label>
                 <Input
                   id="image"
                   type="file"
                   accept="image/*"
                   onChange={handleImageChange}
                   className="cursor-pointer"
+                  required={!editingProduct}
                 />
                 <p className="text-xs text-muted-foreground">Upload a clear product image.</p>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4">
               <div>
                 <Label htmlFor="name">Name *</Label>
                 <Input
@@ -479,31 +501,21 @@ const Products = () => {
                   placeholder="Product name"
                 />
               </div>
-
-              <div>
-                <Label htmlFor="slug">Slug</Label>
-                <Input
-                  id="slug"
-                  value={formData.slug}
-                  onChange={e => setFormData({ ...formData, slug: e.target.value })}
-                  placeholder="product-slug"
-                  disabled={!!editingProduct}
-                />
-              </div>
             </div>
 
             <div>
-              <Label htmlFor="description">Description</Label>
+              <Label htmlFor="description">Description *</Label>
               <Textarea
                 id="description"
                 value={formData.description}
                 onChange={e => setFormData({ ...formData, description: e.target.value })}
                 placeholder="Product description"
                 rows={3}
+                required
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="category">Category *</Label>
                 <Select
@@ -524,17 +536,26 @@ const Products = () => {
               </div>
 
               <div>
-                <Label htmlFor="spice_form">Spice Form</Label>
-                <Input
-                  id="spice_form"
+                <Label htmlFor="spice_form">Spice Form *</Label>
+                <Select
                   value={formData.spice_form}
-                  onChange={e => setFormData({ ...formData, spice_form: e.target.value })}
-                  placeholder="Powder, Whole, Ground"
-                />
+                  onValueChange={value => setFormData({ ...formData, spice_form: value })}
+                >
+                  <SelectTrigger id="spice_form">
+                    <SelectValue placeholder="Select form" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {spiceForms.map(formChoice => (
+                      <SelectItem key={formChoice.value} value={formChoice.value}>
+                        {formChoice.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <Label htmlFor="price">Price *</Label>
                 <Input
@@ -576,15 +597,42 @@ const Products = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="weight">Weight</Label>
-                <Input
-                  id="weight"
-                  value={formData.weight}
-                  onChange={e => setFormData({ ...formData, weight: e.target.value })}
-                  placeholder="100g, 1kg"
-                />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <Label htmlFor="weight">Weight</Label>
+                  <Input
+                    id="weight"
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={formData.weight}
+                    onChange={e => setFormData({ ...formData, weight: e.target.value })}
+                    placeholder="e.g. 500 (number only)"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">Please enter numbers only.</p>
+                </div>
+                <div className="w-24">
+                  <Label htmlFor="unit">Unit</Label>
+                  <Select
+                    value={formData.unit}
+                    onValueChange={value => setFormData({ ...formData, unit: value })}
+                  >
+                    <SelectTrigger id="unit">
+                      <SelectValue placeholder="Unit" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="g">g</SelectItem>
+                      <SelectItem value="kg">kg</SelectItem>
+                      <SelectItem value="ml">ml</SelectItem>
+                      <SelectItem value="l">l</SelectItem>
+                      <SelectItem value="pc">pc</SelectItem>
+                      <SelectItem value="box">box</SelectItem>
+                      <SelectItem value="pack">pack</SelectItem>
+                      <SelectItem value="combo">combo</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
               <div>
@@ -598,7 +646,7 @@ const Products = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="shelf_life">Shelf Life</Label>
                 <Input
@@ -639,7 +687,7 @@ const Products = () => {
               </div>
               
               {/* Image Grid */}
-              <div className="grid grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {/* Existing gallery images */}
                 {galleryImages.map((img) => (
                   <div key={img.id} className="relative group">
@@ -697,7 +745,7 @@ const Products = () => {
               )}
             </div>
 
-            <div className="flex gap-6">
+            <div className="flex flex-wrap gap-4 sm:gap-6">
               <div className="flex items-center space-x-2">
                 <input
                   type="checkbox"
@@ -733,11 +781,18 @@ const Products = () => {
             </div>
 
             <DialogFooter className="gap-2">
-              <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); resetForm(); }}>
+              <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); resetForm(); }} disabled={submitting}>
                 Cancel
               </Button>
-              <Button type="submit">
-                {editingProduct ? 'Update' : 'Create'}
+              <Button type="submit" disabled={submitting}>
+                {submitting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    {editingProduct ? 'Updating...' : 'Creating...'}
+                  </>
+                ) : (
+                  editingProduct ? 'Update Product' : 'Create Product'
+                )}
               </Button>
             </DialogFooter>
           </form>

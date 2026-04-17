@@ -21,6 +21,8 @@ npm-debug.log*
 coverage/
 
 # Environment files (will use build args instead)
+.env
+.env.*
 .env.local
 .env.development.local
 .env.test.local
@@ -37,3 +39,9 @@ docker-compose*.yml
 # OS
 .DS_Store
 Thumbs.db
+
+# Sensitive credentials
+*.pem
+*.csv
+*.key
+

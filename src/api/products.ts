@@ -21,7 +21,8 @@ export interface Product {
   discount_percentage?: number;
   stock: number;
   in_stock?: boolean;
-  weight: string;
+  weight: number;
+  unit: string;
   organic?: boolean;
   image?: string;
   is_featured?: boolean;

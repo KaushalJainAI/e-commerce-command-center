@@ -27,6 +27,8 @@ const Combos = () => {
     items: [] as { product: string; quantity: number }[],
     price: '',
     discount_price: '',
+    weight: '',
+    unit: 'g',
     is_active: true,
     is_featured: false,
   });
@@ -98,6 +100,8 @@ const Combos = () => {
     if (formData.discount_price) {
       form.append('discount_price', String(parseNumberOrZero(formData.discount_price)));
     }
+    form.append('weight', String(parseNumberOrZero(formData.weight)));
+    form.append('unit', formData.unit);
     form.append('is_active', String(formData.is_active));
     form.append('is_featured', String(formData.is_featured));
     
@@ -147,11 +151,11 @@ const Combos = () => {
       setDialogOpen(false);
       resetForm();
       fetchCombos();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Submit error:', error);
       toast({
         title: 'Error',
-        description: 'Failed to save combo',
+        description: error.message || 'Failed to save combo',
         variant: 'destructive',
       });
     } finally {
@@ -247,8 +251,10 @@ const handleToggleStatus = async (combo: Combo) => {
         slug: fullCombo.slug,
         description: fullCombo.description || '',
         items: mappedItems,
-        price: fullCombo.price ?? '',
-        discount_price: fullCombo.discount_price ?? '',
+        price: fullCombo.price !== undefined && fullCombo.price !== null ? String(fullCombo.price) : '',
+        discount_price: fullCombo.discount_price !== undefined && fullCombo.discount_price !== null ? String(fullCombo.discount_price) : '',
+        weight: fullCombo.weight !== undefined && fullCombo.weight !== null ? String(fullCombo.weight) : '',
+        unit: fullCombo.unit || 'g',
         is_active: fullCombo.is_active,
         is_featured: fullCombo.is_featured || false,
       });
@@ -275,6 +281,8 @@ const handleToggleStatus = async (combo: Combo) => {
       items: [],
       price: '',
       discount_price: '',
+      weight: '',
+      unit: 'g',
       is_active: true,
       is_featured: false,
     });
@@ -307,7 +315,7 @@ const handleToggleStatus = async (combo: Combo) => {
 
   return (
     <div className="space-y-6 p-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Combos</h1>
           <p className="text-muted-foreground">Manage product combinations</p>
@@ -330,6 +338,7 @@ const handleToggleStatus = async (combo: Combo) => {
                 <TableHead>Products</TableHead>
                 <TableHead>Price</TableHead>
                 <TableHead>Discount</TableHead>
+                <TableHead>Weight</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
@@ -356,6 +365,9 @@ const handleToggleStatus = async (combo: Combo) => {
                     </TableCell>
                     <TableCell className="font-mono">
                       {discount !== null ? `₹${discount}` : '—'}
+                    </TableCell>
+                    <TableCell className="font-mono text-muted-foreground">
+                      {combo.weight ? `${combo.weight}${combo.unit || ''}` : '—'}
                     </TableCell>
                     <TableCell>
                       <span className={
@@ -442,7 +454,7 @@ const handleToggleStatus = async (combo: Combo) => {
               </div>
             </div>
             
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="name">Name *</Label>
                 <Input
@@ -477,7 +489,7 @@ const handleToggleStatus = async (combo: Combo) => {
               />
             </div>
             
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <Label htmlFor="price">Price *</Label>
                 <Input
@@ -504,6 +516,43 @@ const handleToggleStatus = async (combo: Combo) => {
                 />
               </div>
             </div>
+
+            <div className="flex flex-col sm:flex-row gap-2">
+              <div className="flex-1">
+                <Label htmlFor="weight">Weight</Label>
+                <Input
+                  id="weight"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={formData.weight}
+                  onChange={e => setFormData({ ...formData, weight: e.target.value })}
+                  placeholder="e.g. 500 (number only)"
+                />
+                <p className="text-xs text-muted-foreground mt-1">Please enter numbers only.</p>
+              </div>
+              <div className="w-24">
+                <Label htmlFor="unit">Unit</Label>
+                <Select
+                  value={formData.unit}
+                  onValueChange={value => setFormData({ ...formData, unit: value })}
+                >
+                  <SelectTrigger id="unit">
+                    <SelectValue placeholder="Unit" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="g">g</SelectItem>
+                    <SelectItem value="kg">kg</SelectItem>
+                    <SelectItem value="ml">ml</SelectItem>
+                    <SelectItem value="l">l</SelectItem>
+                    <SelectItem value="pc">pc</SelectItem>
+                    <SelectItem value="box">box</SelectItem>
+                    <SelectItem value="pack">pack</SelectItem>
+                    <SelectItem value="combo">combo</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
             
             <div className="space-y-3">
               <div className="flex items-center justify-between">
@@ -522,8 +571,8 @@ const handleToggleStatus = async (combo: Combo) => {
                     key={index}
                     className={`border rounded-lg p-4 space-y-3 ${isProductMissing ? 'border-red-500 bg-red-50 dark:bg-red-950/20' : ''}`}
                   >
-                    <div className="flex gap-3 items-start">
-                      <div className="flex-1 space-y-3">
+                    <div className="flex flex-col sm:flex-row gap-3 items-start">
+                      <div className="flex-1 space-y-3 w-full">
                         <div>
                           <Label htmlFor={`product-${index}`}>
                             Product {isProductMissing && <span className="text-red-600">(Not Available)</span>}
@@ -565,7 +614,7 @@ const handleToggleStatus = async (combo: Combo) => {
                                   : <span className="text-xs text-red-600 bg-red-100 px-2 py-0.5 rounded">Out of Stock</span>}
                               </div>
                               <div className="text-muted-foreground flex gap-4">
-                                <span>Price: ₹{parseFloat(selectedProduct.price).toFixed(2)}</span>
+                                <span>Price: ₹{Number(selectedProduct.price).toFixed(2)}</span>
                                 <span>Weight: {selectedProduct.weight}</span>
                                 <span>Stock: {selectedProduct.stock}</span>
                               </div>
@@ -592,7 +641,7 @@ const handleToggleStatus = async (combo: Combo) => {
                         />
                         {selectedProduct && (
                           <p className="text-xs text-muted-foreground mt-1">
-                            ₹{(parseFloat(selectedProduct.price) * item.quantity).toFixed(2)}
+                            ₹{(Number(selectedProduct.price) * item.quantity).toFixed(2)}
                           </p>
                         )}
                       </div>
@@ -625,7 +674,7 @@ const handleToggleStatus = async (combo: Combo) => {
                       ₹{formData.items.reduce((total, item) => {
                         const product = getProductById(item.product);
                         if (product)
-                          return total + (parseFloat(product.price) * item.quantity);
+                          return total + (Number(product.price) * item.quantity);
                         return total;
                       }, 0).toFixed(2)}
                     </span>
@@ -637,7 +686,7 @@ const handleToggleStatus = async (combo: Combo) => {
               )}
             </div>
             
-            <div className="flex gap-6">
+            <div className="flex flex-wrap gap-4 sm:gap-6">
               <div className="flex items-center space-x-2">
                 <input
                   type="checkbox"
