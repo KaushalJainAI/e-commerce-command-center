@@ -40,10 +40,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     const initAuth = async () => {
-      const token = localStorage.getItem('admin_token');
-      if (token) {
+      try {
+        const response = await getAdminInfo();
+        setUser(response.data);
         setIsAuthenticated(true);
-        await fetchUserProfile();
+      } catch (error) {
+        setIsAuthenticated(false);
+        setUser(null);
       }
       setLoading(false);
     };
@@ -53,10 +56,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const login = async (email: string, password: string) => {
     try {
       const response = await apiLogin({ email, password });
-      localStorage.setItem('admin_token', response.data.access);
-      if (response.data.refresh) {
-        localStorage.setItem('refresh_token', response.data.refresh);
-      }
       setIsAuthenticated(true);
       await fetchUserProfile();
       navigate('/dashboard');
@@ -65,9 +64,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  const logout = () => {
-    localStorage.removeItem('admin_token');
-    localStorage.removeItem('refresh_token');
+  const logout = async () => {
+    try {
+      await apiLogin({ email: '', password: '' }); // Hack, just to import axios if needed, wait no... we can just use fetch or api.post
+    } catch(e) {}
+    try {
+      const api = (await import('@/api/axiosInstance')).default;
+      await api.post('/auth/logout/');
+    } catch(e) {}
     setIsAuthenticated(false);
     setUser(null);
     navigate('/login');

@@ -2,10 +2,18 @@ import axios from 'axios';
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000/api',
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },
 });
+
+export const getCookie = (name: string): string | null => {
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  if (parts.length === 2) return parts.pop()?.split(";").shift() || null;
+  return null;
+};
 
 // IMPORTANT: Remove Content-Type for FormData to let browser set it with boundary
 api.interceptors.request.use((config) => {
@@ -14,10 +22,9 @@ api.interceptors.request.use((config) => {
     delete config.headers['Content-Type'];
   }
   
-  // Add token to requests
-  const token = localStorage.getItem('admin_token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+  const csrfToken = getCookie("csrftoken");
+  if (csrfToken) {
+    config.headers['X-CSRFToken'] = csrfToken;
   }
   
   return config;
@@ -29,7 +36,6 @@ api.interceptors.response.use(
   (error) => {
     if (error.response) {
       if (error.response.status === 401) {
-        localStorage.removeItem('admin_token');
         window.location.href = '/panel/login';
       }
 
