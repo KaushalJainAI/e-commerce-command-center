@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react';
-import { getProducts, getProduct, createProduct, updateProduct, Product, ProductImage, createProductImage, deleteProductImage, getSpiceForms } from '@/api/products';
+import {
+  getProducts, getProduct, createProduct, updateProduct, Product, ProductImage,
+  createProductImage, deleteProductImage, getSpiceForms,
+  getProductVariants, createProductVariant, updateProductVariant, deleteProductVariant,
+} from '@/api/products';
 import { getCategories, Category } from '@/api/categories';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,7 +14,28 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { Plus, Edit, ToggleLeft, ToggleRight, X, ImagePlus, Loader2 } from 'lucide-react';
+import { Plus, Edit, ToggleLeft, ToggleRight, X, ImagePlus, Loader2, Trash2 } from 'lucide-react';
+
+const UNIT_OPTIONS = ['g', 'kg', 'ml', 'l', 'pc', 'box', 'pack'];
+
+type VariantRow = {
+  key: string;
+  id?: number;
+  weight: string;
+  unit: string;
+  price: string;
+  discount_price: string;
+  stock: string;
+  is_default: boolean;
+  is_active: boolean;
+};
+
+let _rowSeq = 0;
+const newRowKey = () => `row-${Date.now()}-${_rowSeq++}`;
+const blankVariantRow = (is_default = false): VariantRow => ({
+  key: newRowKey(), weight: '', unit: 'g', price: '', discount_price: '',
+  stock: '0', is_default, is_active: true,
+});
 
 const Products = () => {
   const [products, setProducts] = useState<Product[]>([]);
@@ -26,6 +51,7 @@ const Products = () => {
     spice_form: '',
     price: '',
     discount_price: '',
+    tax_rate: '0',
     stock: '',
     weight: '',
     unit: 'g',
@@ -39,6 +65,10 @@ const Products = () => {
   const [submitting, setSubmitting] = useState(false);
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+
+  // Packaging sizes (variants)
+  const [variantRows, setVariantRows] = useState<VariantRow[]>([blankVariantRow(true)]);
+  const [removedVariantIds, setRemovedVariantIds] = useState<number[]>([]);
   
   // Gallery images state
   const [galleryImages, setGalleryImages] = useState<ProductImage[]>([]);
@@ -89,17 +119,55 @@ const Products = () => {
     return Number.isNaN(n) ? 0 : n;
   };
 
+  // ---- Packaging size (variant) row helpers ----
+  const getDefaultRow = (): VariantRow | undefined => {
+    const active = variantRows.filter(r => r.is_active);
+    return active.find(r => r.is_default) || active[0] || variantRows[0];
+  };
+
+  const addVariantRow = () => {
+    setVariantRows(prev => [...prev, blankVariantRow(prev.length === 0)]);
+  };
+
+  const updateVariantRow = (key: string, patch: Partial<VariantRow>) => {
+    setVariantRows(prev => prev.map(r => (r.key === key ? { ...r, ...patch } : r)));
+  };
+
+  const setDefaultRow = (key: string) => {
+    setVariantRows(prev => prev.map(r => ({ ...r, is_default: r.key === key })));
+  };
+
+  const removeVariantRow = (key: string) => {
+    setVariantRows(prev => {
+      const row = prev.find(r => r.key === key);
+      if (row?.id) setRemovedVariantIds(ids => [...ids, row.id as number]);
+      const remaining = prev.filter(r => r.key !== key);
+      // Ensure one default remains among active rows
+      if (row?.is_default) {
+        const firstActive = remaining.find(r => r.is_active);
+        if (firstActive) firstActive.is_default = true;
+      }
+      return [...remaining];
+    });
+  };
+
   const buildFormData = () => {
+    // The product's legacy price/stock/weight fields are seeded from the
+    // default size; the backend then keeps them mirrored to the default variant.
+    const def = getDefaultRow();
     const form = new FormData();
     form.append('name', formData.name);
     if (formData.description) form.append('description', formData.description);
     if (formData.category) form.append('category', formData.category);
     if (formData.spice_form) form.append('spice_form', formData.spice_form);
-    form.append('price', String(parseNumberOrZero(formData.price)));
-    if (formData.discount_price) form.append('discount_price', String(parseNumberOrZero(formData.discount_price)));
-    form.append('stock', String(parseInt(formData.stock) || 0));
-    form.append('weight', String(parseNumberOrZero(formData.weight)));
-    form.append('unit', formData.unit);
+    form.append('price', String(parseNumberOrZero(def?.price ?? '0')));
+    if (def?.discount_price) form.append('discount_price', String(parseNumberOrZero(def.discount_price)));
+    form.append('stock', String(parseInt(def?.stock ?? '0') || 0));
+    // Per-product GST rate (%). Frontend default is 0; set per product
+    // (e.g. 5 for taxable goods, 0 for papad / papad katran).
+    form.append('tax_rate', String(parseNumberOrZero(formData.tax_rate || '0')));
+    form.append('weight', String(parseNumberOrZero(def?.weight ?? '0')));
+    form.append('unit', def?.unit || 'g');
     if (formData.origin_country) form.append('origin_country', formData.origin_country);
     form.append('organic', String(formData.organic));
     if (formData.shelf_life) form.append('shelf_life', formData.shelf_life);
@@ -110,38 +178,81 @@ const Products = () => {
     return form;
   };
 
+  const syncVariants = async (productId: number) => {
+    // Deletions first (returns 200 when a size is kept-but-deactivated due to orders)
+    for (const id of removedVariantIds) {
+      try { await deleteProductVariant(id); } catch { /* ignore individual failures */ }
+    }
+    // Guarantee one default among active rows
+    const hasDefault = variantRows.some(r => r.is_active && r.is_default);
+    let assignedDefault = hasDefault;
+    let idx = 0;
+    for (const r of variantRows) {
+      let isDefault = r.is_active && r.is_default;
+      if (!assignedDefault && r.is_active) { isDefault = true; assignedDefault = true; }
+      const payload = {
+        product: productId,
+        weight: parseNumberOrZero(r.weight),
+        unit: r.unit,
+        price: parseNumberOrZero(r.price),
+        discount_price: r.discount_price ? parseNumberOrZero(r.discount_price) : null,
+        stock: parseInt(r.stock) || 0,
+        is_default: isDefault,
+        is_active: r.is_active,
+        display_order: idx++,
+      };
+      if (r.id) await updateProductVariant(r.id, payload);
+      else await createProductVariant(payload);
+    }
+  };
+
+  const validateVariants = (): string | null => {
+    const active = variantRows.filter(r => r.is_active);
+    if (active.length === 0) return 'Add at least one packaging size.';
+    for (const r of active) {
+      if (!(parseNumberOrZero(r.weight) > 0)) return 'Each size needs a weight greater than 0.';
+      if (!(parseNumberOrZero(r.price) > 0)) return 'Each size needs a price greater than 0.';
+      if (r.discount_price && parseNumberOrZero(r.discount_price) >= parseNumberOrZero(r.price))
+        return 'Discount price must be less than the price for every size.';
+    }
+    return null;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const sizeError = validateVariants();
+    if (sizeError) {
+      toast({ title: 'Check packaging sizes', description: sizeError, variant: 'destructive' });
+      return;
+    }
+    if (!editingProduct && !imageFile) {
+      toast({ title: 'Image Required', description: 'Please upload a product image for new products.', variant: 'destructive' });
+      return;
+    }
+
     setSubmitting(true);
     try {
       const form = buildFormData();
       let productId: number;
-      
+
       if (editingProduct) {
         await updateProduct(editingProduct.slug, form);
         productId = editingProduct.id;
-        toast({ title: 'Success', description: 'Product updated successfully' });
       } else {
-        // Basic frontend validation for required fields
-        if (!imageFile) {
-          toast({
-            title: 'Image Required',
-            description: 'Please upload a product image for new products.',
-            variant: 'destructive',
-          });
-          return;
-        }
-        
         const newProduct = await createProduct(form);
         productId = newProduct.id;
-        toast({ title: 'Success', description: 'Product created successfully' });
       }
-      
+
+      // Sync packaging sizes (variants)
+      await syncVariants(productId);
+
       // Upload gallery images if any
       if (newGalleryImages.length > 0) {
         await uploadGalleryImages(productId);
       }
-      
+
+      toast({ title: 'Success', description: editingProduct ? 'Product updated successfully' : 'Product created successfully' });
       setDialogOpen(false);
       resetForm();
       fetchProducts();
@@ -213,6 +324,7 @@ const Products = () => {
         spice_form: fullProduct.spice_form || '',
         price: fullProduct.price !== undefined && fullProduct.price !== null ? String(fullProduct.price) : '',
         discount_price: fullProduct.discount_price !== undefined && fullProduct.discount_price !== null ? String(fullProduct.discount_price) : '',
+        tax_rate: fullProduct.tax_rate !== undefined && fullProduct.tax_rate !== null ? String(fullProduct.tax_rate) : '0',
         stock: String(fullProduct.stock ?? 0),
         weight: fullProduct.weight !== undefined && fullProduct.weight !== null ? String(fullProduct.weight) : '',
         unit: fullProduct.unit || 'g',
@@ -228,6 +340,39 @@ const Products = () => {
       // Set gallery images from product
       setGalleryImages(fullProduct.images || []);
       setNewGalleryImages([]);
+      // Load packaging sizes (variants), including inactive ones, for editing
+      setRemovedVariantIds([]);
+      try {
+        const variants = await getProductVariants(product.id);
+        if (variants.length > 0) {
+          setVariantRows(
+            variants
+              .sort((a, b) => (a.display_order ?? 0) - (b.display_order ?? 0))
+              .map(v => ({
+                key: newRowKey(),
+                id: v.id,
+                weight: v.weight !== null && v.weight !== undefined ? String(v.weight) : '',
+                unit: v.unit || 'g',
+                price: v.price !== null && v.price !== undefined ? String(v.price) : '',
+                discount_price: v.discount_price !== null && v.discount_price !== undefined ? String(v.discount_price) : '',
+                stock: String(v.stock ?? 0),
+                is_default: !!v.is_default,
+                is_active: v.is_active !== false,
+              }))
+          );
+        } else {
+          // Legacy product without variants — seed one default row from its fields
+          setVariantRows([{
+            key: newRowKey(), weight: fullProduct.weight ? String(fullProduct.weight) : '',
+            unit: fullProduct.unit || 'g',
+            price: fullProduct.price !== undefined && fullProduct.price !== null ? String(fullProduct.price) : '',
+            discount_price: fullProduct.discount_price !== undefined && fullProduct.discount_price !== null ? String(fullProduct.discount_price) : '',
+            stock: String(fullProduct.stock ?? 0), is_default: true, is_active: true,
+          }]);
+        }
+      } catch {
+        setVariantRows([blankVariantRow(true)]);
+      }
       setDialogOpen(true);
     } catch {
       toast({
@@ -248,6 +393,7 @@ const Products = () => {
       spice_form: '',
       price: '',
       discount_price: '',
+      tax_rate: '0',
       stock: '',
       weight: '',
       unit: 'g',
@@ -263,6 +409,9 @@ const Products = () => {
     // Reset gallery images
     setGalleryImages([]);
     setNewGalleryImages([]);
+    // Reset packaging sizes to a single default row
+    setVariantRows([blankVariantRow(true)]);
+    setRemovedVariantIds([]);
   };
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -397,7 +546,10 @@ const Products = () => {
                       )}
                     </TableCell>
                     <TableCell className="font-mono text-muted-foreground">
-                      {product.weight ? `${product.weight}${product.unit || ''}` : '—'}
+                      <div>{product.weight ? `${product.weight}${product.unit || ''}` : '—'}</div>
+                      {product.variant_count && product.variant_count > 1 ? (
+                        <div className="text-[10px] text-primary font-sans">{product.variant_count} sizes</div>
+                      ) : null}
                     </TableCell>
                     <TableCell>
                       <span className={`${product.stock && product.stock > 0 ? 'text-green-600' : 'text-red-600'}`}>
@@ -555,86 +707,85 @@ const Products = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div>
-                <Label htmlFor="price">Price *</Label>
-                <Input
-                  id="price"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={formData.price}
-                  onChange={e => setFormData({ ...formData, price: e.target.value })}
-                  required
-                  placeholder="0.00"
-                />
+            {/* Packaging Sizes (variants) */}
+            <div className="space-y-3 rounded-lg border p-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label className="text-base">Packaging Sizes</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Each size is sold separately. Pick one as the default (shown first / used for the "from" price).
+                  </p>
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={addVariantRow}>
+                  <Plus className="mr-2 h-4 w-4" /> Add Size
+                </Button>
               </div>
 
-              <div>
-                <Label htmlFor="discount_price">Discount Price</Label>
-                <Input
-                  id="discount_price"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={formData.discount_price}
-                  onChange={e => setFormData({ ...formData, discount_price: e.target.value })}
-                  placeholder="0.00"
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="stock">Stock *</Label>
-                <Input
-                  id="stock"
-                  type="number"
-                  min="0"
-                  value={formData.stock}
-                  onChange={e => setFormData({ ...formData, stock: e.target.value })}
-                  required
-                  placeholder="0"
-                />
+              <div className="space-y-2">
+                {variantRows.map((row) => (
+                  <div
+                    key={row.key}
+                    className={`grid grid-cols-12 gap-2 items-end rounded-md border p-2 ${row.is_active ? '' : 'opacity-60'}`}
+                  >
+                    <div className="col-span-3 sm:col-span-2">
+                      <Label className="text-xs">Weight</Label>
+                      <Input type="number" step="0.01" min="0" value={row.weight}
+                        onChange={e => updateVariantRow(row.key, { weight: e.target.value })}
+                        placeholder="e.g. 100" />
+                    </div>
+                    <div className="col-span-3 sm:col-span-2">
+                      <Label className="text-xs">Unit</Label>
+                      <Select value={row.unit} onValueChange={v => updateVariantRow(row.key, { unit: v })}>
+                        <SelectTrigger><SelectValue placeholder="Unit" /></SelectTrigger>
+                        <SelectContent>
+                          {UNIT_OPTIONS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="col-span-3 sm:col-span-2">
+                      <Label className="text-xs">Price</Label>
+                      <Input type="number" step="0.01" min="0" value={row.price}
+                        onChange={e => updateVariantRow(row.key, { price: e.target.value })}
+                        placeholder="0.00" />
+                    </div>
+                    <div className="col-span-3 sm:col-span-2">
+                      <Label className="text-xs">Discount</Label>
+                      <Input type="number" step="0.01" min="0" value={row.discount_price}
+                        onChange={e => updateVariantRow(row.key, { discount_price: e.target.value })}
+                        placeholder="—" />
+                    </div>
+                    <div className="col-span-3 sm:col-span-1">
+                      <Label className="text-xs">Stock</Label>
+                      <Input type="number" min="0" value={row.stock}
+                        onChange={e => updateVariantRow(row.key, { stock: e.target.value })}
+                        placeholder="0" />
+                    </div>
+                    <div className="col-span-6 sm:col-span-2 flex items-center gap-3 pb-2">
+                      <label className="flex items-center gap-1 text-xs cursor-pointer" title="Default size">
+                        <input type="radio" name="default-variant" checked={row.is_default}
+                          onChange={() => setDefaultRow(row.key)} />
+                        Default
+                      </label>
+                      <label className="flex items-center gap-1 text-xs cursor-pointer" title="Active / visible">
+                        <input type="checkbox" checked={row.is_active}
+                          onChange={e => updateVariantRow(row.key, { is_active: e.target.checked })} />
+                        Active
+                      </label>
+                    </div>
+                    <div className="col-span-3 sm:col-span-1 flex justify-end pb-1">
+                      <Button type="button" variant="ghost" size="icon"
+                        onClick={() => removeVariantRow(row.key)}
+                        disabled={variantRows.length <= 1}
+                        title="Remove size">
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="flex gap-2">
-                <div className="flex-1">
-                  <Label htmlFor="weight">Weight</Label>
-                  <Input
-                    id="weight"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={formData.weight}
-                    onChange={e => setFormData({ ...formData, weight: e.target.value })}
-                    placeholder="e.g. 500 (number only)"
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">Please enter numbers only.</p>
-                </div>
-                <div className="w-24">
-                  <Label htmlFor="unit">Unit</Label>
-                  <Select
-                    value={formData.unit}
-                    onValueChange={value => setFormData({ ...formData, unit: value })}
-                  >
-                    <SelectTrigger id="unit">
-                      <SelectValue placeholder="Unit" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="g">g</SelectItem>
-                      <SelectItem value="kg">kg</SelectItem>
-                      <SelectItem value="ml">ml</SelectItem>
-                      <SelectItem value="l">l</SelectItem>
-                      <SelectItem value="pc">pc</SelectItem>
-                      <SelectItem value="box">box</SelectItem>
-                      <SelectItem value="pack">pack</SelectItem>
-                      <SelectItem value="combo">combo</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
               <div>
                 <Label htmlFor="origin_country">Origin Country</Label>
                 <Input
@@ -643,6 +794,24 @@ const Products = () => {
                   onChange={e => setFormData({ ...formData, origin_country: e.target.value })}
                   placeholder="India"
                 />
+              </div>
+
+              <div>
+                <Label htmlFor="tax_rate">Tax Rate (GST %)</Label>
+                <Input
+                  id="tax_rate"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.01"
+                  value={formData.tax_rate}
+                  onChange={e => setFormData({ ...formData, tax_rate: e.target.value })}
+                  placeholder="5"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Default 0. Set 5 for taxable goods; keep 0 for exempt items
+                  like papad / papad katran.
+                </p>
               </div>
             </div>
 

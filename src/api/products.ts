@@ -8,6 +8,38 @@ export interface ProductImage {
   alt_text: string;
 }
 
+export interface ProductVariant {
+  id: number;
+  product?: number;
+  slug?: string;
+  weight: number | string | null;
+  unit: string;
+  formatted_weight?: string;
+  price: number | string;
+  discount_price?: number | string | null;
+  final_price?: number;
+  discount_percentage?: number;
+  stock: number;
+  in_stock?: boolean;
+  sku?: string;
+  is_default: boolean;
+  is_active: boolean;
+  display_order: number;
+}
+
+export type ProductVariantInput = {
+  product: number;
+  weight: number | string | null;
+  unit: string;
+  price: number | string;
+  discount_price?: number | string | null;
+  stock: number;
+  sku?: string;
+  is_default: boolean;
+  is_active: boolean;
+  display_order: number;
+};
+
 export interface Product {
   id: number;
   slug: string;
@@ -17,6 +49,8 @@ export interface Product {
   spice_form: string;
   price: number;
   discount_price?: number;
+  /** GST rate (%) for this product. Defaults to 5; papad/papad katran are 0. */
+  tax_rate?: number | string;
   final_price?: number;
   discount_percentage?: number;
   stock: number;
@@ -35,6 +69,8 @@ export interface Product {
   images?: ProductImage[];
   origin_country?: string;
   shelf_life?: string;
+  variants?: ProductVariant[];
+  variant_count?: number;
 }
 
 interface PaginatedResponse<T> {
@@ -88,4 +124,27 @@ export const createProductImage = async (productId: number, image: File, altText
 
 export const deleteProductImage = async (id: number) => {
   await api.delete(`/product-images/${id}/`);
+};
+
+// ---- Product variants (packaging sizes) ----
+
+export const getProductVariants = async (productId: number | string) => {
+  const response = await api.get<ProductVariant[]>(`/product-variants/?product=${productId}`);
+  return Array.isArray(response.data) ? response.data : [];
+};
+
+export const createProductVariant = async (data: ProductVariantInput) => {
+  const response = await api.post<ProductVariant>('/product-variants/', data);
+  return response.data;
+};
+
+export const updateProductVariant = async (id: number, data: Partial<ProductVariantInput>) => {
+  const response = await api.patch<ProductVariant>(`/product-variants/${id}/`, data);
+  return response.data;
+};
+
+export const deleteProductVariant = async (id: number) => {
+  // Returns 204 (deleted) or 200 (deactivated because referenced by orders)
+  const response = await api.delete(`/product-variants/${id}/`);
+  return response.data;
 };

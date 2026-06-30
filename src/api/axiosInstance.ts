@@ -35,7 +35,11 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response) {
-      if (error.response.status === 401) {
+      if (error.response.status === 401 || error.response.status === 403) {
+        localStorage.removeItem('admin_token');
+        localStorage.removeItem('refresh_token');
+      }
+      if (error.response.status === 401 && !window.location.pathname.includes('/login')) {
         window.location.href = '/panel/login';
       }
 

@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import {
   LayoutDashboard,
+  BarChart3,
   Package,
   Layers,
   Network,
@@ -10,8 +11,9 @@ import {
   Ticket,
   Truck,
   RotateCcw,
+  Shield,
   User,
-  MessageSquare,
+  MessagesSquare,
   Mail,
   LogOut,
 } from 'lucide-react';
@@ -30,15 +32,17 @@ import { useAuth } from '@/contexts/AuthContext';
 
 const menuItems = [
   { title: 'Dashboard', url: '/dashboard', icon: LayoutDashboard },
+  { title: 'Insights', url: '/insights', icon: BarChart3 },
   { title: 'Products', url: '/products', icon: Package },
   { title: 'Combos', url: '/combos', icon: Layers },
   { title: 'Orders', url: '/orders', icon: ShoppingCart },
   { title: 'Coupons', url: '/coupons', icon: Ticket },
   { title: 'Shipping Policy', url: '/shipping-policy', icon: Truck },
   { title: 'Return Policy', url: '/return-policy', icon: RotateCcw },
+  { title: 'Privacy Policy', url: '/privacy-policy', icon: Shield },
   { title: 'Admin Info', url: '/admin-info', icon: User },
   { title: 'Contact', url: '/contact', icon: Mail },
-  { title: 'Chat Support', url: '/chat', icon: MessageSquare },
+  { title: 'Conversations', url: '/conversations', icon: MessagesSquare },
 ];
 
 export function AdminSidebar() {

@@ -8,6 +8,7 @@ import ProtectedRoute from "@/components/ProtectedRoute";
 import AdminLayout from "@/components/AdminLayout";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
+import Insights from "./pages/Insights";
 import Products from "./pages/Products";
 import Combos from "./pages/Combos";
 import ProductGraph from "./pages/ProductGraph";
@@ -16,9 +17,10 @@ import Orders from "./pages/Orders";
 import Coupons from "./pages/Coupons";
 import ShippingPolicy from "./pages/ShippingPolicy";
 import ReturnPolicy from "./pages/ReturnPolicy";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
 import AdminInfo from "./pages/AdminInfo";
-import ChatSupport from "./pages/ChatSupport";
 import ContactSubmissions from "./pages/ContactSubmissions";
+import Conversations from "./pages/Conversations";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -42,6 +44,7 @@ const App = () => (
               }
             >
               <Route path="dashboard" element={<Dashboard />} />
+              <Route path="insights" element={<Insights />} />
               <Route path="products" element={<Products />} />
               <Route path="combos" element={<Combos />} />
               {/* <Route path="graph" element={<ProductGraph />} /> */}
@@ -50,9 +53,10 @@ const App = () => (
               <Route path="coupons" element={<Coupons />} />
               <Route path="shipping-policy" element={<ShippingPolicy />} />
               <Route path="return-policy" element={<ReturnPolicy />} />
+              <Route path="privacy-policy" element={<PrivacyPolicy />} />
               <Route path="admin-info" element={<AdminInfo />} />
               <Route path="contact" element={<ContactSubmissions />} />
-              <Route path="chat" element={<ChatSupport />} />
+              <Route path="conversations" element={<Conversations />} />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>

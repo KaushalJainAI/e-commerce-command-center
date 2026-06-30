@@ -6,18 +6,18 @@ This document explains the design principles and patterns specific to the admin 
 
 ## Design Principles
 
-### 1. **CRUD-Centric Pages**
+### 1. CRUD-Centric Pages
 Each page manages one resource type with consistent patterns:
-- **List view** (table with actions)
-- **Create dialog** (form modal)
-- **Edit dialog** (form modal with pre-filled data)
-- **Delete/Toggle** (inline actions)
+- **List view** — table with actions
+- **Create dialog** — form modal
+- **Edit dialog** — form modal with pre-filled data
+- **Delete/Toggle** — inline actions
 
-### 2. **Optimistic Updates**
-Status toggles update UI immediately:
+### 2. Optimistic Updates
+Status toggles update the UI immediately, then sync to the backend:
 ```typescript
 // Update UI first
-setProducts(prev => prev.map(p => 
+setProducts(prev => prev.map(p =>
   p.id === id ? { ...p, is_active: !p.is_active } : p
 ));
 
@@ -25,10 +25,10 @@ setProducts(prev => prev.map(p =>
 await updateProduct(id, { is_active: !isActive });
 ```
 
-### 3. **Admin-Only Access**
+### 3. Admin-Only Access
 All routes require `is_staff=True`. Auth check happens at:
-- **Frontend**: Route guard redirects to login
-- **Backend**: `IsAdminUser` permission class
+- **Frontend**: Route guard redirects to `/login`
+- **Backend**: `IsAdminUser` permission class on all write endpoints
 
 ---
 
@@ -70,44 +70,47 @@ All routes require `is_staff=True`. Auth check happens at:
 
 ### 1. Auth Context
 
-Same pattern as customer frontend but with admin-specific checks:
-```typescript
-// Login validates is_staff on backend
-// Token stored in localStorage
-// All API calls include Authorization header
-```
+Same cookie-based auth as the customer frontend, with admin-specific checks:
+- Login validates `is_staff` on the backend; non-staff accounts are rejected
+- JWTs are stored in **HttpOnly cookies** — the Axios instance sends them automatically via `withCredentials: true`
+- On 401, the Axios interceptor clears `admin_token`/`refresh_token` from localStorage and redirects to `/login` (unless already on the login page, to avoid a refresh loop)
+- On 403, localStorage is also cleared but no redirect is forced
 
 ### 2. Products: Gallery Image Upload
 
-Products support multiple gallery images:
+Products support a primary image and multiple gallery images:
 ```typescript
-// State
 const [galleryImages, setGalleryImages] = useState<ProductImage[]>([]);
 const [newGalleryImages, setNewGalleryImages] = useState<File[]>([]);
 
-// On submit, upload new images after product save
+// On submit, product saved first, then gallery images uploaded individually
 await createProductImage(productId, file, altText);
 ```
 
-**Upload Flow**:
+**Upload flow:**
 1. User selects multiple images
-2. Images stored locally with preview
+2. Images previewed locally
 3. On form submit, product saved first
-4. Then gallery images uploaded individually
-5. Delete existing images via API
+4. Gallery images uploaded individually
+5. Existing images deleted via API
 
 ### 3. Order Status Management
 
-Orders have a status workflow:
+Orders follow this workflow:
 ```
 PENDING → CONFIRMED → PROCESSING → SHIPPED → DELIVERED → CANCELLED
 ```
+Admin updates status via a dropdown in the order detail view.
 
-Admin can update status via dropdown in order detail.
+### 4. Homepage Sections (Admin-Ordered)
 
-### 4. Policy Pages (Shipping/Return)
+The **Sections** page uses `django-admin-sortable2` on the backend. Admins can drag
+products within a section to set their display order. The `position` column on
+`ProductSection` persists this order.
 
-Policies may not exist initially. The page handles this:
+### 5. Policy Pages (Shipping/Return)
+
+Policies may not exist initially:
 ```typescript
 const fetchPolicy = async () => {
   try {
@@ -115,23 +118,44 @@ const fetchPolicy = async () => {
     setContent(response.data.content);
   } catch (error) {
     if (error?.response?.status === 404) {
-      // Policy not configured yet
       setNotConfigured(true);
       setContent('');  // Empty editor for creation
     }
   }
 };
 ```
+Saving to a non-existent policy auto-creates it (PUT upsert).
 
-Save/PATCH to non-existent policy auto-creates it.
+### 6. Conversations (Chat Support)
 
-### 5. Dashboard Caching
+The **Conversations** page (`/conversations`) is the admin inbox for the unified AI + human chat system.
 
-Dashboard stats are cached server-side (2 minutes):
+**Data sources:**
+- `GET /api/assistant/conversations/admin/` — lists all threads (supports `?needs_human=true` and `?status=resolved` filters)
+- `GET /api/assistant/conversations/{id}/messages/` — full message history for a thread
+- `POST /api/assistant/conversations/{id}/admin-reply/` — send an admin message into a thread
+- `PATCH /api/assistant/conversations/{id}/` — update thread status (`active`/`resolved`/`archived`) or assignment
+
+**Polling:**
+- Thread list refreshes every **10 seconds**
+- Open thread messages refresh every **5 seconds**
+
+**Filter tabs:** All / Needs Human / Resolved — mapped to `?needs_human` and `?status` query params.
+
+**Message roles displayed:** `user` (customer), `assistant` (AI), `admin` (human staff reply), `tool` (internal agent step — shown collapsed).
+
 ```typescript
-// Backend caches expensive aggregations
-// Frontend shows cached data with quick load
+// Marking a thread resolved
+await patchConversation(convId, { status: 'resolved' });
+setConversations(prev => prev.map(c =>
+  c.conversation_id === convId ? { ...c, status: 'resolved' } : c
+));
 ```
+
+### 8. Dashboard Caching
+
+Dashboard stats are cached server-side for ~60 seconds (Redis `ngu:dashboard:*` key) to
+avoid expensive aggregations on every page load.
 
 ---
 
@@ -142,9 +166,11 @@ Dashboard stats are cached server-side (2 minutes):
 | Dashboard | Stats overview, recent orders |
 | Products | Product CRUD + gallery images |
 | Combos | Combo CRUD + product items |
+| Categories | Category CRUD |
+| Sections | Homepage section product ordering |
 | Orders | Order list, status updates |
 | Coupons | Discount code CRUD |
-| Chat Support | Customer chat messages |
+| Conversations | All customer chat threads (AI + human); admin reply, status management |
 | Contact | Contact form submissions |
 | Shipping Policy | Editable policy content |
 | Return Policy | Editable policy content |
@@ -156,7 +182,6 @@ Dashboard stats are cached server-side (2 minutes):
 
 ### FormData for File Uploads
 
-When forms include files, use FormData:
 ```typescript
 const buildFormData = () => {
   const form = new FormData();
@@ -174,7 +199,7 @@ Combo items are serialized as JSON within FormData:
 form.append('items', JSON.stringify(
   comboItems.map(item => ({
     product: item.productId,
-    quantity: item.quantity
+    quantity: item.quantity,
   }))
 ));
 ```
@@ -184,7 +209,6 @@ form.append('items', JSON.stringify(
 ## Error Handling
 
 ### Toast Notifications
-All operations show feedback:
 ```typescript
 try {
   await saveProduct(data);
@@ -195,7 +219,7 @@ try {
 ```
 
 ### Form Validation
-Client-side validation before submit:
+Client-side validation runs before submit:
 ```typescript
 if (!formData.name.trim()) {
   toast({ title: 'Error', description: 'Name is required' });
@@ -212,12 +236,12 @@ if (!formData.name.trim()) {
 1. Create API functions in `src/api/resource.ts`
 2. Create page component `src/pages/Resources.tsx`
 3. Add route in `App.tsx`
-4. Add sidebar link (if needed)
+4. Add sidebar link if needed
 
-### Adding a New Field to Existing Resource
+### Adding a New Field to an Existing Resource
 
-1. Add to TypeScript interface
+1. Add to the TypeScript interface
 2. Add to form state
 3. Add form input in dialog
-4. Add to buildFormData() if applicable
-5. Add column to table (optional)
+4. Add to `buildFormData()` if applicable
+5. Add column to the table (optional)
