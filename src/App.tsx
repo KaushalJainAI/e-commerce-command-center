@@ -15,9 +15,6 @@ import ProductGraph from "./pages/ProductGraph";
 import Orders from "./pages/Orders";
 // import RecycleBin from "./pages/RecycleBin";
 import Coupons from "./pages/Coupons";
-import ShippingPolicy from "./pages/ShippingPolicy";
-import ReturnPolicy from "./pages/ReturnPolicy";
-import PrivacyPolicy from "./pages/PrivacyPolicy";
 import AdminInfo from "./pages/AdminInfo";
 import ContactSubmissions from "./pages/ContactSubmissions";
 import Conversations from "./pages/Conversations";
@@ -51,9 +48,6 @@ const App = () => (
               <Route path="orders" element={<Orders />} />
               {/* <Route path="recycle-bin" element={<RecycleBin />} /> */}
               <Route path="coupons" element={<Coupons />} />
-              <Route path="shipping-policy" element={<ShippingPolicy />} />
-              <Route path="return-policy" element={<ReturnPolicy />} />
-              <Route path="privacy-policy" element={<PrivacyPolicy />} />
               <Route path="admin-info" element={<AdminInfo />} />
               <Route path="contact" element={<ContactSubmissions />} />
               <Route path="conversations" element={<Conversations />} />

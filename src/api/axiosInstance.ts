@@ -1,7 +1,11 @@
 import axios from 'axios';
 
+// Runtime config injected by the container (config.js) takes precedence,
+// then the build-time Vite env var, then the local-dev default.
+const runtimeApiUrl = (window as unknown as { APP_CONFIG?: { API_URL?: string } }).APP_CONFIG?.API_URL;
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000/api',
+  baseURL: runtimeApiUrl || import.meta.env.VITE_API_URL || 'http://localhost:8000/api',
   withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
