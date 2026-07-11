@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getOrders, updateOrder, deleteOrder, cancelOrder, Order, OrderStatus, OrderFilters } from '@/api/orders';
+import { getOrders, updateOrder, deleteOrder, cancelOrder, Order, OrderStatus, OrderFilters, PaymentMethod } from '@/api/orders';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -22,33 +22,46 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { Edit, Trash2, Filter, Eye } from 'lucide-react';
+import { Edit, Trash2, Filter, Eye, Ban } from 'lucide-react';
+
+const PAGE_SIZE = 12; // must match backend REST_FRAMEWORK PAGE_SIZE
 
 const Orders = () => {
   const [orders, setOrders] = useState<Order[]>([]);
-  const [filteredOrders, setFilteredOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [viewingOrder, setViewingOrder] = useState<Order | null>(null);
+  const [trackingInput, setTrackingInput] = useState('');
+  const [savingTracking, setSavingTracking] = useState(false);
   const [filters, setFilters] = useState<OrderFilters>({});
+  const [page, setPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
   const { toast } = useToast();
 
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+
+  // Refetch from the server whenever the filters or page change. Filtering and
+  // sorting run in the DB (not the browser), so results are correct across the
+  // whole order history, not just the currently loaded page.
   useEffect(() => {
     fetchOrders();
-  }, []);
-
-  useEffect(() => {
-    applyFilters();
-  }, [orders, filters]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters, page]);
 
   const fetchOrders = async () => {
+    setLoading(true);
     try {
-      const response = await getOrders();
-      // Handle both array and paginated response
-      const ordersData = Array.isArray(response.data) ? response.data : (response.data as any).results || [];
-      setOrders(ordersData);
-      setFilteredOrders(ordersData);
+      const response = await getOrders(filters, page);
+      const data = response.data;
+      if (Array.isArray(data)) {
+        // Unpaginated fallback (shouldn't happen with server pagination on).
+        setOrders(data);
+        setTotalCount(data.length);
+      } else {
+        setOrders(data.results || []);
+        setTotalCount(data.count || 0);
+      }
     } catch (error) {
       toast({
         title: 'Error',
@@ -60,34 +73,11 @@ const Orders = () => {
     }
   };
 
-  const applyFilters = () => {
-    let filtered = [...orders];
-
-    if (filters.status) {
-      filtered = filtered.filter(o => o.status === filters.status);
-    }
-    if (filters.paymentMethod) {
-      filtered = filtered.filter(o => o.payment_method === filters.paymentMethod);
-    }
-    if (filters.minAmount) {
-      filtered = filtered.filter(o => o.total >= (filters.minAmount || 0));
-    }
-    if (filters.maxAmount) {
-      filtered = filtered.filter(o => o.total <= (filters.maxAmount || Infinity));
-    }
-
-    // Sorting
-    if (filters.sortBy === 'newest') {
-      filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-    } else if (filters.sortBy === 'oldest') {
-      filtered.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-    } else if (filters.sortBy === 'highestTotal') {
-      filtered.sort((a, b) => b.total - a.total);
-    } else if (filters.sortBy === 'lowestTotal') {
-      filtered.sort((a, b) => a.total - b.total);
-    }
-
-    setFilteredOrders(filtered);
+  // Changing a filter must send the user back to page 1, otherwise a narrower
+  // result set could leave them stranded on a now-empty page.
+  const updateFilters = (next: OrderFilters) => {
+    setPage(1);
+    setFilters(next);
   };
 
   const handleUpdateStatus = async (orderId: number, status: OrderStatus) => {
@@ -119,9 +109,51 @@ const Orders = () => {
     }
   };
 
+  // Soft-delete: moves the order to the Recycle Bin (recoverable), rather than
+  // destroying it. Distinct from Cancel, which restocks and notifies.
+  const handleDeleteOrder = async (id: number) => {
+    if (!confirm('Move this order to the Recycle Bin? You can restore it later.')) return;
+    try {
+      await deleteOrder(id);
+      toast({ title: 'Moved to Recycle Bin', description: 'The order can be restored from the Recycle Bin.' });
+      fetchOrders();
+    } catch (error: any) {
+      toast({
+        title: 'Error',
+        description: error.response?.data?.error || 'Failed to delete order',
+        variant: 'destructive',
+      });
+    }
+  };
+
   const openViewDialog = (order: Order) => {
     setViewingOrder(order);
+    setTrackingInput(order.tracking_number || '');
     setDialogOpen(true);
+  };
+
+  const handleSaveTracking = async () => {
+    if (!viewingOrder) return;
+    const value = trackingInput.trim();
+    if (value === (viewingOrder.tracking_number || '')) return;
+    try {
+      setSavingTracking(true);
+      const { data } = await updateOrder(viewingOrder.id, { tracking_number: value });
+      toast({
+        title: 'Success',
+        description: value ? 'Tracking number saved — customer notified' : 'Tracking number cleared',
+      });
+      setViewingOrder(data);
+      fetchOrders();
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to save tracking number',
+        variant: 'destructive',
+      });
+    } finally {
+      setSavingTracking(false);
+    }
   };
 
   const getStatusBadgeColor = (status: OrderStatus) => {
@@ -148,15 +180,23 @@ const Orders = () => {
           <h1 className="text-3xl font-bold">Orders</h1>
           <p className="text-muted-foreground">Manage customer orders</p>
         </div>
-        <Button variant="outline" onClick={() => setFilterOpen(true)}>
-          <Filter className="mr-2 h-4 w-4" />
-          Filter & Sort
-        </Button>
+        <div className="flex items-center gap-2">
+          <Input
+            placeholder="Search order # / customer…"
+            className="w-56"
+            value={filters.search || ''}
+            onChange={(e) => updateFilters({ ...filters, search: e.target.value || undefined })}
+          />
+          <Button variant="outline" onClick={() => setFilterOpen(true)}>
+            <Filter className="mr-2 h-4 w-4" />
+            Filter & Sort
+          </Button>
+        </div>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>All Orders ({filteredOrders.length})</CardTitle>
+          <CardTitle>All Orders ({totalCount})</CardTitle>
         </CardHeader>
         <CardContent className="overflow-x-auto">
           <Table className="min-w-[700px]">
@@ -173,14 +213,14 @@ const Orders = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredOrders.length === 0 ? (
+              {orders.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={8} className="text-center text-muted-foreground">
                     No orders found
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredOrders.map((order) => (
+                orders.map((order) => (
                   <TableRow key={order.id}>
                     <TableCell className="font-medium">{order.order_number}</TableCell>
                     <TableCell>
@@ -215,14 +255,23 @@ const Orders = () => {
                     </TableCell>
                     <TableCell>{new Date(order.created_at).toLocaleDateString()}</TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="icon" onClick={() => openViewDialog(order)}>
+                      <Button variant="ghost" size="icon" onClick={() => openViewDialog(order)} title="View order">
                         <Eye className="h-4 w-4" />
                       </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="icon" 
+                      <Button
+                        variant="ghost"
+                        size="icon"
                         onClick={() => handleCancelOrder(order.id)}
                         disabled={order.status === 'cancelled' || order.status === 'delivered'}
+                        title="Cancel order (restocks & notifies customer)"
+                      >
+                        <Ban className="h-4 w-4 text-amber-600" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleDeleteOrder(order.id)}
+                        title="Move to Recycle Bin"
                       >
                         <Trash2 className="h-4 w-4 text-destructive" />
                       </Button>
@@ -232,6 +281,31 @@ const Orders = () => {
               )}
             </TableBody>
           </Table>
+
+          {/* Server-side pagination — filters/sort already applied in the DB */}
+          <div className="flex items-center justify-between pt-4">
+            <p className="text-sm text-muted-foreground">
+              Page {page} of {totalPages} • {totalCount} order{totalCount === 1 ? '' : 's'}
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={loading || page <= 1}
+              >
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={loading || page >= totalPages}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
 
@@ -244,9 +318,9 @@ const Orders = () => {
           <div className="space-y-4">
             <div>
               <Label>Status</Label>
-              <Select 
-                value={filters.status || ''} 
-                onValueChange={(value) => setFilters({ ...filters, status: value as OrderStatus || undefined })}
+              <Select
+                value={filters.status || ''}
+                onValueChange={(value) => updateFilters({ ...filters, status: value as OrderStatus || undefined })}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="All statuses" />
@@ -264,8 +338,24 @@ const Orders = () => {
               </Select>
             </div>
             <div>
+              <Label>Payment Method</Label>
+              <Select
+                value={filters.paymentMethod || ''}
+                onValueChange={(value) => updateFilters({ ...filters, paymentMethod: (value as PaymentMethod) || undefined })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="All methods" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">All</SelectItem>
+                  <SelectItem value="COD">COD</SelectItem>
+                  <SelectItem value="ONLINE">Online</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
               <Label>Sort By</Label>
-              <Select value={filters.sortBy || ''} onValueChange={(value) => setFilters({ ...filters, sortBy: value as any || undefined })}>
+              <Select value={filters.sortBy || ''} onValueChange={(value) => updateFilters({ ...filters, sortBy: value as any || undefined })}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select sorting" />
                 </SelectTrigger>
@@ -285,7 +375,7 @@ const Orders = () => {
                   type="number"
                   placeholder="₹0"
                   value={filters.minAmount || ''}
-                  onChange={(e) => setFilters({ ...filters, minAmount: parseFloat(e.target.value) || undefined })}
+                  onChange={(e) => updateFilters({ ...filters, minAmount: parseFloat(e.target.value) || undefined })}
                 />
               </div>
               <div>
@@ -294,13 +384,13 @@ const Orders = () => {
                   type="number"
                   placeholder="No limit"
                   value={filters.maxAmount || ''}
-                  onChange={(e) => setFilters({ ...filters, maxAmount: parseFloat(e.target.value) || undefined })}
+                  onChange={(e) => updateFilters({ ...filters, maxAmount: parseFloat(e.target.value) || undefined })}
                 />
               </div>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { setFilters({}); setFilterOpen(false); }}>
+            <Button variant="outline" onClick={() => { updateFilters({}); setFilterOpen(false); }}>
               Clear Filters
             </Button>
             <Button onClick={() => setFilterOpen(false)}>Apply</Button>
@@ -351,6 +441,26 @@ const Orders = () => {
                   <p className="font-medium">{viewingOrder.phone_number}</p>
                 </div>
               )}
+
+              <div>
+                <Label className="text-muted-foreground">Tracking Number</Label>
+                <div className="flex gap-2 mt-1">
+                  <Input
+                    placeholder="Enter courier tracking number"
+                    value={trackingInput}
+                    onChange={(e) => setTrackingInput(e.target.value)}
+                  />
+                  <Button
+                    onClick={handleSaveTracking}
+                    disabled={savingTracking || trackingInput.trim() === (viewingOrder.tracking_number || '')}
+                  >
+                    {savingTracking ? 'Saving...' : 'Save'}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Saving a tracking number emails the customer that their order has shipped.
+                </p>
+              </div>
 
               <div>
                 <Label className="text-muted-foreground">Order Items</Label>

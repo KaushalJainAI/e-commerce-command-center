@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import {
-  getProducts, getProduct, createProduct, updateProduct, Product, ProductImage,
+  getProducts, getProduct, createProduct, updateProduct, updateProductSections, Product, ProductImage,
   createProductImage, deleteProductImage, getSpiceForms,
   getProductVariants, createProductVariant, updateProductVariant, deleteProductVariant,
 } from '@/api/products';
 import { getCategories, Category } from '@/api/categories';
+import { getSections, ProductSection } from '@/api/sections';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -40,6 +41,8 @@ const blankVariantRow = (is_default = false): VariantRow => ({
 const Products = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [sections, setSections] = useState<ProductSection[]>([]);
+  const [selectedSections, setSelectedSections] = useState<number[]>([]);
   const [spiceForms, setSpiceForms] = useState<{ value: string; label: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -80,14 +83,16 @@ const Products = () => {
   useEffect(() => {
     const init = async () => {
       try {
-        const [productsRes, categoriesRes, spiceFormsRes] = await Promise.all([
+        const [productsRes, categoriesRes, spiceFormsRes, sectionsRes] = await Promise.all([
           getProducts(),
           getCategories(),
           getSpiceForms(),
+          getSections(),
         ]);
         setProducts(productsRes.data || []);
         setCategories(categoriesRes.data || []);
         setSpiceForms(spiceFormsRes || []);
+        setSections(sectionsRes || []);
       } catch {
         toast({
           title: 'Error',
@@ -117,6 +122,12 @@ const Products = () => {
   const parseNumberOrZero = (value: string) => {
     const n = parseFloat(value);
     return Number.isNaN(n) ? 0 : n;
+  };
+
+  const toggleSection = (sectionId: number) => {
+    setSelectedSections((prev) =>
+      prev.includes(sectionId) ? prev.filter((id) => id !== sectionId) : [...prev, sectionId]
+    );
   };
 
   // ---- Packaging size (variant) row helpers ----
@@ -235,17 +246,27 @@ const Products = () => {
     try {
       const form = buildFormData();
       let productId: number;
+      // The product-detail endpoint is addressed by slug (lookup_field='slug'),
+      // so section placement PATCHes must use the slug, not the numeric id.
+      let productSlug: string;
 
       if (editingProduct) {
         await updateProduct(editingProduct.slug, form);
         productId = editingProduct.id;
+        productSlug = editingProduct.slug;
       } else {
         const newProduct = await createProduct(form);
         productId = newProduct.id;
+        productSlug = newProduct.slug;
       }
 
-      // Sync packaging sizes (variants)
+      // Sync packaging sizes (variants) — keyed by the numeric product id.
       await syncVariants(productId);
+
+      // Replace homepage-section placements. Sent as a separate JSON PATCH so an
+      // empty selection cleanly clears all placements (a multipart body can't
+      // express an empty list).
+      await updateProductSections(productSlug, selectedSections);
 
       // Upload gallery images if any
       if (newGalleryImages.length > 0) {
@@ -337,6 +358,8 @@ const Products = () => {
       });
       setImageFile(null);
       setImagePreview(fullProduct.image || null);
+      // Prefill the section placements from the product (array of section IDs).
+      setSelectedSections(fullProduct.sections || []);
       // Set gallery images from product
       setGalleryImages(fullProduct.images || []);
       setNewGalleryImages([]);
@@ -406,6 +429,7 @@ const Products = () => {
     });
     setImageFile(null);
     setImagePreview(null);
+    setSelectedSections([]);
     // Reset gallery images
     setGalleryImages([]);
     setNewGalleryImages([]);
@@ -813,6 +837,41 @@ const Products = () => {
                   like papad / papad katran.
                 </p>
               </div>
+            </div>
+
+            {/* Homepage Sections */}
+            <div className="space-y-2 rounded-lg border p-3">
+              <div>
+                <Label className="text-base">Homepage Sections</Label>
+                <p className="text-xs text-muted-foreground">
+                  Choose which homepage sections this product appears in.
+                </p>
+              </div>
+              {sections.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No sections defined yet. Create sections in the Django admin first.
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {sections.map((section) => (
+                    <label
+                      key={section.id}
+                      className="flex items-center gap-2 text-sm cursor-pointer rounded-md border px-3 py-2"
+                    >
+                      <input
+                        type="checkbox"
+                        className="rounded"
+                        checked={selectedSections.includes(section.id)}
+                        onChange={() => toggleSection(section.id)}
+                      />
+                      <span className="truncate">{section.name}</span>
+                      {!section.is_active && (
+                        <span className="text-xs text-muted-foreground">(inactive)</span>
+                      )}
+                    </label>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

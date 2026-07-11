@@ -32,7 +32,19 @@ export interface Combo {
   created_at?: string;
   items?: ComboItem[];
   products?: number[];  // Product IDs in combo
+  /** IDs of the homepage sections this combo is placed in. */
+  sections?: number[];
+  /** Read-only section names for display. */
+  section_names?: string[];
 }
+
+/** Replace the set of homepage sections a combo is placed in. */
+export const updateComboSections = async (slugOrId: string | number, sections: number[]) => {
+  const response = await api.patch<Combo>(`/combos/${slugOrId}/`, { sections }, {
+    headers: { 'Content-Type': 'application/json' },
+  });
+  return response.data;
+};
 
 interface PaginatedResponse<T> {
   count: number;

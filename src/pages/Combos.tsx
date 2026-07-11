@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { getCombos, getCombo, createCombo, updateCombo, Combo, ComboItem } from '@/api/combos';
+import { getCombos, getCombo, createCombo, updateCombo, updateComboSections, Combo, ComboItem } from '@/api/combos';
 import { getProducts, Product } from '@/api/products';
+import { getSections, ProductSection } from '@/api/sections';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -17,6 +18,8 @@ const Combos = () => {
   const [combos, setCombos] = useState<Combo[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [allProducts, setAllProducts] = useState<Product[]>([]);
+  const [sections, setSections] = useState<ProductSection[]>([]);
+  const [selectedSections, setSelectedSections] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingCombo, setEditingCombo] = useState<Combo | null>(null);
@@ -41,11 +44,14 @@ const Combos = () => {
   useEffect(() => {
     const init = async () => {
       try {
-        const [combosRes, productsRes] = await Promise.all([getCombos(), getProducts()]);
+        const [combosRes, productsRes, sectionsRes] = await Promise.all([
+          getCombos(), getProducts(), getSections(),
+        ]);
         setCombos(combosRes.data || []);
         const activeProducts = productsRes.data.filter((p) => p.is_active);
         setProducts(activeProducts);
         setAllProducts(productsRes.data);
+        setSections(sectionsRes || []);
       } catch {
         toast({
           title: 'Error',
@@ -89,6 +95,12 @@ const Combos = () => {
   const parseNumberOrZero = (value: string) => {
     const n = parseFloat(value);
     return Number.isNaN(n) ? 0 : n;
+  };
+
+  const toggleSection = (sectionId: number) => {
+    setSelectedSections((prev) =>
+      prev.includes(sectionId) ? prev.filter((id) => id !== sectionId) : [...prev, sectionId]
+    );
   };
 
   const buildFormData = () => {
@@ -139,15 +151,23 @@ const Combos = () => {
     
     try {
       const form = buildFormData();
-      
+
+      // Slug we can address the combo by afterwards to set its sections.
+      let comboSlug: string;
       if (editingCombo) {
         await updateCombo(editingCombo.slug, form);
+        comboSlug = editingCombo.slug;
         toast({ title: 'Success', description: 'Combo updated successfully' });
       } else {
-        await createCombo(form);
+        const created = await createCombo(form);
+        comboSlug = created.slug;
         toast({ title: 'Success', description: 'Combo created successfully' });
       }
-      
+
+      // Replace homepage-section placements (separate JSON PATCH so an empty
+      // selection cleanly clears all placements).
+      await updateComboSections(comboSlug, selectedSections);
+
       setDialogOpen(false);
       resetForm();
       fetchCombos();
@@ -258,6 +278,7 @@ const handleToggleStatus = async (combo: Combo) => {
         is_active: fullCombo.is_active,
         is_featured: fullCombo.is_featured || false,
       });
+      setSelectedSections(fullCombo.sections || []);
       setImageFile(null);
       setImagePreview(fullCombo.image || null);
       setDialogOpen(true);
@@ -286,6 +307,7 @@ const handleToggleStatus = async (combo: Combo) => {
       is_active: true,
       is_featured: false,
     });
+    setSelectedSections([]);
     setImageFile(null);
     setImagePreview(null);
   };
@@ -686,6 +708,41 @@ const handleToggleStatus = async (combo: Combo) => {
               )}
             </div>
             
+            {/* Homepage Sections */}
+            <div className="space-y-2 rounded-lg border p-3">
+              <div>
+                <Label className="text-base">Homepage Sections</Label>
+                <p className="text-xs text-muted-foreground">
+                  Choose which homepage sections this combo appears in.
+                </p>
+              </div>
+              {sections.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No sections defined yet. Create sections in the Django admin first.
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {sections.map((section) => (
+                    <label
+                      key={section.id}
+                      className="flex items-center gap-2 text-sm cursor-pointer rounded-md border px-3 py-2"
+                    >
+                      <input
+                        type="checkbox"
+                        className="rounded"
+                        checked={selectedSections.includes(section.id)}
+                        onChange={() => toggleSection(section.id)}
+                      />
+                      <span className="truncate">{section.name}</span>
+                      {!section.is_active && (
+                        <span className="text-xs text-muted-foreground">(inactive)</span>
+                      )}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div className="flex flex-wrap gap-4 sm:gap-6">
               <div className="flex items-center space-x-2">
                 <input

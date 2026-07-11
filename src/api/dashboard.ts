@@ -13,8 +13,6 @@ export interface DashboardStats {
   totalCombos: number;
   totalOrders: number;
   activeCoupons: number;
-  graphNodesCount: number;
-  graphEdgesCount: number;  // Note: backend returns graphEdgeCount (no 's')
   recentOrders: RecentOrder[];
 }
 

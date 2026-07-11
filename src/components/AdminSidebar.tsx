@@ -6,12 +6,12 @@ import {
   BarChart3,
   Package,
   Layers,
-  Network,
   ShoppingCart,
   Ticket,
   User,
   MessagesSquare,
   Mail,
+  Trash2,
   LogOut,
 } from 'lucide-react';
 import {
@@ -34,6 +34,7 @@ const menuItems = [
   { title: 'Combos', url: '/combos', icon: Layers },
   { title: 'Orders', url: '/orders', icon: ShoppingCart },
   { title: 'Coupons', url: '/coupons', icon: Ticket },
+  { title: 'Recycle Bin', url: '/recycle-bin', icon: Trash2 },
   { title: 'Admin Info', url: '/admin-info', icon: User },
   { title: 'Contact', url: '/contact', icon: Mail },
   { title: 'Conversations', url: '/conversations', icon: MessagesSquare },

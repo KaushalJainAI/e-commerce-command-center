@@ -11,9 +11,8 @@ import Dashboard from "./pages/Dashboard";
 import Insights from "./pages/Insights";
 import Products from "./pages/Products";
 import Combos from "./pages/Combos";
-import ProductGraph from "./pages/ProductGraph";
 import Orders from "./pages/Orders";
-// import RecycleBin from "./pages/RecycleBin";
+import RecycleBin from "./pages/RecycleBin";
 import Coupons from "./pages/Coupons";
 import AdminInfo from "./pages/AdminInfo";
 import ContactSubmissions from "./pages/ContactSubmissions";
@@ -44,9 +43,8 @@ const App = () => (
               <Route path="insights" element={<Insights />} />
               <Route path="products" element={<Products />} />
               <Route path="combos" element={<Combos />} />
-              {/* <Route path="graph" element={<ProductGraph />} /> */}
               <Route path="orders" element={<Orders />} />
-              {/* <Route path="recycle-bin" element={<RecycleBin />} /> */}
+              <Route path="recycle-bin" element={<RecycleBin />} />
               <Route path="coupons" element={<Coupons />} />
               <Route path="admin-info" element={<AdminInfo />} />
               <Route path="contact" element={<ContactSubmissions />} />

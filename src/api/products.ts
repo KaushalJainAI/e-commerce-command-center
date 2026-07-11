@@ -71,7 +71,17 @@ export interface Product {
   shelf_life?: string;
   variants?: ProductVariant[];
   variant_count?: number;
+  /** IDs of the homepage sections this product is placed in. */
+  sections?: number[];
+  /** Read-only section names for display. */
+  section_names?: string[];
 }
+
+/** Replace the set of homepage sections a product is placed in. */
+export const updateProductSections = async (slugOrId: string | number, sections: number[]) => {
+  const response = await api.patch<Product>(`/products/${slugOrId}/`, { sections });
+  return response.data;
+};
 
 interface PaginatedResponse<T> {
   count: number;

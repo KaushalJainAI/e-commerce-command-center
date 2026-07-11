@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getCoupons, getCoupon, createCoupon, updateCoupon, deleteCoupon, Coupon } from '@/api/coupons';
+import { getCoupons, getCoupon, createCoupon, updateCoupon, deleteCoupon, validateCoupon, Coupon } from '@/api/coupons';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -34,6 +34,8 @@ const Coupons = () => {
     valid_until: '',
     is_active: true,
   });
+  const [checkCode, setCheckCode] = useState('');
+  const [checking, setChecking] = useState(false);
 
   const { toast } = useToast();
 
@@ -125,6 +127,33 @@ const Coupons = () => {
     }
   };
 
+  const handleCheckCode = async () => {
+    const code = checkCode.trim();
+    if (!code) return;
+    setChecking(true);
+    try {
+      const result = await validateCoupon(code);
+      if (result.valid) {
+        toast({
+          title: `"${code}" is valid`,
+          description: 'This coupon exists, is active, and is redeemable.',
+        });
+      } else {
+        toast({
+          title: `"${code}" is not usable`,
+          description: result.reason || result.error || 'This coupon cannot be redeemed.',
+          variant: 'destructive',
+        });
+      }
+    } catch (error: any) {
+      // 404 → coupon doesn't exist; surface the backend message when present.
+      const msg = error?.response?.data?.error || 'Coupon not found.';
+      toast({ title: `"${code}" not found`, description: msg, variant: 'destructive' });
+    } finally {
+      setChecking(false);
+    }
+  };
+
   const handleDelete = async (coupon: Coupon) => {
     if (!confirm(`Delete coupon "${coupon.code}"?`)) return;
 
@@ -208,6 +237,33 @@ const Coupons = () => {
           <Plus className="mr-2 h-4 w-4" /> Add Coupon
         </Button>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Check a Code</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
+            <div className="flex-1">
+              <Label htmlFor="check-code">Coupon code</Label>
+              <Input
+                id="check-code"
+                value={checkCode}
+                onChange={(e) => setCheckCode(e.target.value.toUpperCase())}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleCheckCode(); } }}
+                placeholder="SAVE20"
+                className="font-mono"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Verify a code exists and is redeemable (active, not expired, under its usage limit).
+              </p>
+            </div>
+            <Button type="button" onClick={handleCheckCode} disabled={checking || !checkCode.trim()}>
+              {checking ? 'Checking…' : 'Check'}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

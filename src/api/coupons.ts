@@ -54,8 +54,16 @@ export const deleteCoupon = async (id: number) => {
   await api.delete(`/coupons/${id}/`);
 };
 
-// Validate coupon code (optional - if you have this endpoint)
-export const validateCoupon = async (code: string) => {
-  const response = await api.post<{ valid: boolean; coupon?: Coupon; error?: string }>('/coupons/validate/', { code });
+// Validate coupon code — admin check that a code exists and is redeemable
+// (active, not expired, usage limit not reached).
+export interface CouponValidation {
+  valid: boolean;
+  reason?: string | null;
+  coupon?: Coupon;
+  error?: string;
+}
+
+export const validateCoupon = async (code: string): Promise<CouponValidation> => {
+  const response = await api.post<CouponValidation>('/coupons/validate/', { code });
   return response.data;
 };

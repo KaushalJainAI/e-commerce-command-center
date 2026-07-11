@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getDashboardStats, DashboardStats } from '@/api/dashboard';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Package, Layers, ShoppingCart, Ticket, Network, Circle } from 'lucide-react';
+import { Package, Layers, ShoppingCart, Ticket } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 const Dashboard = () => {
@@ -37,8 +37,6 @@ const Dashboard = () => {
     { title: 'Total Combos', value: stats?.totalCombos || 0, icon: Layers, color: 'text-accent' },
     { title: 'Total Orders', value: stats?.totalOrders || 0, icon: ShoppingCart, color: 'text-success' },
     { title: 'Active Coupons', value: stats?.activeCoupons || 0, icon: Ticket, color: 'text-warning' },
-    { title: 'Graph Nodes', value: stats?.graphNodesCount || 0, icon: Network, color: 'text-info' },
-    { title: 'Graph Edges', value: stats?.graphEdgesCount || 0, icon: Circle, color: 'text-muted-foreground' },
   ];
 
   return (
