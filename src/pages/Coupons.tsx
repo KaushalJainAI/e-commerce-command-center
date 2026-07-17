@@ -145,9 +145,10 @@ const Coupons = () => {
           variant: 'destructive',
         });
       }
-    } catch (error: any) {
+    } catch (error) {
       // 404 → coupon doesn't exist; surface the backend message when present.
-      const msg = error?.response?.data?.error || 'Coupon not found.';
+      // APIError (extends Error) carries the backend message on `.message`.
+      const msg = error instanceof Error && error.message ? error.message : 'Coupon not found.';
       toast({ title: `"${code}" not found`, description: msg, variant: 'destructive' });
     } finally {
       setChecking(false);

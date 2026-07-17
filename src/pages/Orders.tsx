@@ -100,10 +100,11 @@ const Orders = () => {
       await cancelOrder(id);
       toast({ title: 'Success', description: 'Order cancelled' });
       fetchOrders();
-    } catch (error: any) {
+    } catch (error) {
+      // The axios interceptor normalizes the backend message onto `error.message`.
       toast({
         title: 'Error',
-        description: error.response?.data?.error || 'Failed to cancel order',
+        description: error instanceof Error && error.message ? error.message : 'Failed to cancel order',
         variant: 'destructive',
       });
     }
@@ -117,10 +118,10 @@ const Orders = () => {
       await deleteOrder(id);
       toast({ title: 'Moved to Recycle Bin', description: 'The order can be restored from the Recycle Bin.' });
       fetchOrders();
-    } catch (error: any) {
+    } catch (error) {
       toast({
         title: 'Error',
-        description: error.response?.data?.error || 'Failed to delete order',
+        description: error instanceof Error && error.message ? error.message : 'Failed to delete order',
         variant: 'destructive',
       });
     }
