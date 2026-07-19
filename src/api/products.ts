@@ -55,6 +55,8 @@ export interface Product {
   discount_percentage?: number;
   stock: number;
   in_stock?: boolean;
+  /** Warn when stock falls to or below this (per-product; backend default 5). */
+  low_stock_threshold?: number;
   weight: number;
   unit: string;
   organic?: boolean;

@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   getProducts, getProduct, createProduct, updateProduct, updateProductSections, Product, ProductImage,
   createProductImage, deleteProductImage, getSpiceForms,
@@ -15,7 +16,9 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { Plus, Edit, ToggleLeft, ToggleRight, X, ImagePlus, Loader2, Trash2 } from 'lucide-react';
+import { Plus, Edit, ToggleLeft, ToggleRight, X, ImagePlus, Loader2, Trash2, Search, Copy } from 'lucide-react';
+import { checkImageFile } from '@/lib/imageCheck';
+import { PageHelp } from '@/components/PageHelp';
 
 const UNIT_OPTIONS = ['g', 'kg', 'ml', 'l', 'pc', 'box', 'pack'];
 
@@ -45,6 +48,15 @@ const Products = () => {
   const [selectedSections, setSelectedSections] = useState<number[]>([]);
   const [spiceForms, setSpiceForms] = useState<{ value: string; label: string }[]>([]);
   const [loading, setLoading] = useState(true);
+  // The dashboard's "Restock products" button deep-links to /products?stock=low.
+  const [searchParams] = useSearchParams();
+  const [searchQuery, setSearchQuery] = useState(() => searchParams.get('search') || '');
+  const [filterCategory, setFilterCategory] = useState('all');
+  const [filterStock, setFilterStock] = useState<'all' | 'low' | 'out'>(() => {
+    const s = searchParams.get('stock');
+    return s === 'low' || s === 'out' ? s : 'all';
+  });
+  const [sortBy, setSortBy] = useState<'newest' | 'name' | 'priceLow' | 'priceHigh' | 'stockLow'>('newest');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [formData, setFormData] = useState({
@@ -438,23 +450,75 @@ const Products = () => {
     setRemovedVariantIds([]);
   };
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    const check = await checkImageFile(file);
+    if (!check.ok) {
+      toast({ title: 'Photo problem', description: check.error, variant: 'destructive' });
+      e.target.value = '';
+      return;
+    }
+    if (check.warning) {
+      toast({ title: 'Small photo', description: check.warning });
+    }
     setImageFile(file);
     setImagePreview(URL.createObjectURL(file));
   };
 
+  // Duplicate: open the create dialog pre-filled from an existing product so
+  // similar SKUs don't have to be typed from scratch. Images stay behind —
+  // the copy gets its own photos.
+  const openDuplicateDialog = async (product: Product) => {
+    try {
+      const fullProduct = await getProduct(product.slug);
+      resetForm();
+      setFormData({
+        name: `${fullProduct.name} (copy)`,
+        description: fullProduct.description || '',
+        category: String(fullProduct.category),
+        spice_form: fullProduct.spice_form || '',
+        price: fullProduct.price != null ? String(fullProduct.price) : '',
+        discount_price: fullProduct.discount_price != null ? String(fullProduct.discount_price) : '',
+        tax_rate: fullProduct.tax_rate != null ? String(fullProduct.tax_rate) : '0',
+        stock: '0',
+        weight: fullProduct.weight != null ? String(fullProduct.weight) : '',
+        unit: fullProduct.unit || 'g',
+        origin_country: fullProduct.origin_country || 'India',
+        organic: fullProduct.organic || false,
+        shelf_life: fullProduct.shelf_life || '',
+        ingredients: fullProduct.ingredients || '',
+        is_active: false, // start hidden so the admin reviews it before it goes live
+        is_featured: false,
+      });
+      setDialogOpen(true);
+      toast({
+        title: 'Copy ready',
+        description: 'Details copied. Change the name, add photos, then save. The copy starts hidden.',
+      });
+    } catch {
+      toast({ title: 'Error', description: 'Failed to load product details', variant: 'destructive' });
+    }
+  };
+
   // Gallery image handlers
-  const handleGalleryImageAdd = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleGalleryImageAdd = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
-    
-    const newImages = Array.from(files).map(file => ({
-      file,
-      preview: URL.createObjectURL(file)
-    }));
-    setNewGalleryImages(prev => [...prev, ...newImages]);
+
+    const accepted: { file: File; preview: string }[] = [];
+    for (const file of Array.from(files)) {
+      const check = await checkImageFile(file);
+      if (!check.ok) {
+        toast({ title: 'Photo skipped', description: check.error, variant: 'destructive' });
+        continue;
+      }
+      if (check.warning) {
+        toast({ title: 'Small photo', description: check.warning });
+      }
+      accepted.push({ file, preview: URL.createObjectURL(file) });
+    }
+    if (accepted.length) setNewGalleryImages(prev => [...prev, ...accepted]);
     // Reset input so same file can be selected again
     e.target.value = '';
   };
@@ -508,6 +572,37 @@ const Products = () => {
     return n.toFixed(2);
   };
 
+  // Search/filter/sort run client-side: the admin product list is unpaginated
+  // (backend pagination_class=None), so the full catalog is already in memory.
+  // "Low" is per-product: each product carries its own low_stock_threshold
+  // (backend default 5), matching what the dashboard, digest and low-stock API
+  // consider low — so the ?stock=low deep-link shows exactly that set.
+  const isLowStock = (p: Product) => p.stock > 0 && p.stock <= (p.low_stock_threshold ?? 5);
+  const visibleProducts = useMemo(() => {
+    let list = products;
+    const q = searchQuery.trim().toLowerCase();
+    if (q) {
+      list = list.filter(p =>
+        p.name.toLowerCase().includes(q) ||
+        (p.category_name || '').toLowerCase().includes(q)
+      );
+    }
+    if (filterCategory !== 'all') {
+      list = list.filter(p => String(p.category) === filterCategory);
+    }
+    if (filterStock === 'low') list = list.filter(isLowStock);
+    if (filterStock === 'out') list = list.filter(p => p.stock === 0);
+    const sorted = [...list];
+    switch (sortBy) {
+      case 'name': sorted.sort((a, b) => a.name.localeCompare(b.name)); break;
+      case 'priceLow': sorted.sort((a, b) => Number(a.price) - Number(b.price)); break;
+      case 'priceHigh': sorted.sort((a, b) => Number(b.price) - Number(a.price)); break;
+      case 'stockLow': sorted.sort((a, b) => a.stock - b.stock); break;
+      default: break; // 'newest' — keep server order (-created_at)
+    }
+    return sorted;
+  }, [products, searchQuery, filterCategory, filterStock, sortBy]);
+
   if (loading) {
     return <div className="flex items-center justify-center min-h-[400px]">Loading...</div>;
   }
@@ -524,9 +619,60 @@ const Products = () => {
         </Button>
       </div>
 
+      <PageHelp>
+        This is your full product list. Use the search and filters to find a product,
+        then tap the pencil to edit it. The copy icon starts a new product from an
+        existing one. To change many prices or stock levels at once, use the
+        "Bulk Price &amp; Stock" page.
+      </PageHelp>
+
       <Card>
         <CardHeader>
           <CardTitle>All Products</CardTitle>
+          <div className="flex flex-col sm:flex-row gap-2 pt-2">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search by name or category…"
+                className="pl-8"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+            <Select value={filterCategory} onValueChange={setFilterCategory}>
+              <SelectTrigger className="w-full sm:w-44">
+                <SelectValue placeholder="All categories" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All categories</SelectItem>
+                {categories.map(c => (
+                  <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={filterStock} onValueChange={(v) => setFilterStock(v as typeof filterStock)}>
+              <SelectTrigger className="w-full sm:w-40">
+                <SelectValue placeholder="Stock" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Any stock</SelectItem>
+                <SelectItem value="low">Low stock</SelectItem>
+                <SelectItem value="out">Out of stock</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={sortBy} onValueChange={(v) => setSortBy(v as typeof sortBy)}>
+              <SelectTrigger className="w-full sm:w-44">
+                <SelectValue placeholder="Sort" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="newest">Newest first</SelectItem>
+                <SelectItem value="name">Name A–Z</SelectItem>
+                <SelectItem value="priceLow">Price: low to high</SelectItem>
+                <SelectItem value="priceHigh">Price: high to low</SelectItem>
+                <SelectItem value="stockLow">Stock: lowest first</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </CardHeader>
         <CardContent className="overflow-x-auto">
           <Table className="min-w-[600px]">
@@ -543,7 +689,16 @@ const Products = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {products.map((product) => {
+              {visibleProducts.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
+                    {products.length === 0
+                      ? 'No products yet. Click "Add Product" to create your first one.'
+                      : 'No products match your search or filters.'}
+                  </TableCell>
+                </TableRow>
+              )}
+              {visibleProducts.map((product) => {
                 const price = formatMoney(product.price);
                 const discount = formatMoney(product.discount_price);
                 return (
@@ -576,8 +731,13 @@ const Products = () => {
                       ) : null}
                     </TableCell>
                     <TableCell>
-                      <span className={`${product.stock && product.stock > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      <span className={
+                        !product.stock ? 'text-red-600 font-semibold'
+                          : isLowStock(product) ? 'text-amber-600 font-semibold'
+                          : 'text-green-600'
+                      }>
                         {product.stock || 0}
+                        {!product.stock ? ' (out)' : isLowStock(product) ? ' (low)' : ''}
                       </span>
                     </TableCell>
                     <TableCell>
@@ -595,10 +755,18 @@ const Products = () => {
                       <Button 
                         variant="ghost" 
                         size="icon" 
-                        onClick={() => openEditDialog(product)} 
+                        onClick={() => openEditDialog(product)}
                         title="Edit product"
                       >
                         <Edit className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => openDuplicateDialog(product)}
+                        title="Duplicate — start a new product from this one"
+                      >
+                        <Copy className="h-4 w-4" />
                       </Button>
                       <Button
                         variant="ghost"

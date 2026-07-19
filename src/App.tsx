@@ -10,8 +10,13 @@ import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Insights from "./pages/Insights";
 import Products from "./pages/Products";
+import Categories from "./pages/Categories";
+import Sections from "./pages/Sections";
+import Reviews from "./pages/Reviews";
 import Combos from "./pages/Combos";
 import Orders from "./pages/Orders";
+import Customers from "./pages/Customers";
+import BulkEdit from "./pages/BulkEdit";
 import RecycleBin from "./pages/RecycleBin";
 import Coupons from "./pages/Coupons";
 import AdminInfo from "./pages/AdminInfo";
@@ -42,8 +47,14 @@ const App = () => (
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="insights" element={<Insights />} />
               <Route path="products" element={<Products />} />
+              <Route path="categories" element={<Categories />} />
+              <Route path="sections" element={<Sections />} />
+              <Route path="reviews" element={<Reviews />} />
+              <Route path="bulk-edit" element={<BulkEdit />} />
               <Route path="combos" element={<Combos />} />
               <Route path="orders" element={<Orders />} />
+              <Route path="customers" element={<Customers />} />
+              <Route path="customers/:id" element={<Customers />} />
               <Route path="recycle-bin" element={<RecycleBin />} />
               <Route path="coupons" element={<Coupons />} />
               <Route path="admin-info" element={<AdminInfo />} />

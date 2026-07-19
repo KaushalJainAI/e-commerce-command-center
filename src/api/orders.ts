@@ -35,6 +35,10 @@ export interface Order {
   updated_at: string;
   is_deleted?: boolean;
   deleted_at?: string | null;
+  // Admin-only delivery bill (courier/delivery receipt). Only metadata is sent
+  // over the API — the file itself is streamed through a staff-gated endpoint.
+  has_delivery_bill?: boolean;
+  delivery_bill_uploaded_at?: string | null;
 }
 
 export interface OrderFilters {
@@ -64,6 +68,8 @@ export const getOrders = (filters?: OrderFilters, page = 1) => {
   const params: Record<string, string | number> = { page };
   if (filters?.status) params.status = filters.status;
   if (filters?.paymentMethod) params.payment_method = filters.paymentMethod;
+  if (filters?.dateFrom) params.date_from = filters.dateFrom;
+  if (filters?.dateTo) params.date_to = filters.dateTo;
   if (filters?.minAmount != null) params.min_amount = filters.minAmount;
   if (filters?.maxAmount != null) params.max_amount = filters.maxAmount;
   if (filters?.sortBy) params.ordering = filters.sortBy;
@@ -107,3 +113,67 @@ export const restoreOrder = (id: number | string) =>
 // Cancel order action
 export const cancelOrder = (id: number | string) =>
   api.post(`/orders/${id}/cancel/`);
+
+// Download the PDF tax invoice / bill for an order and trigger a browser
+// download. The endpoint returns a binary PDF (not JSON), so we request a blob
+// via the configured axios instance (carries the auth cookie + baseURL). Staff
+// access is enforced server-side by OrderViewSet.get_queryset().
+// Download the printable packing slip PDF (address + items + COD amount) for
+// packing and sticking on the parcel. Staff-only endpoint.
+export const downloadPackingSlip = async (
+  id: number | string,
+  orderNumber?: string,
+): Promise<void> => {
+  const res = await api.get(`/orders/${id}/packing-slip/`, { responseType: 'blob' });
+  const url = window.URL.createObjectURL(res.data as Blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `packing-slip-${orderNumber || `order-${id}`}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(url);
+};
+
+export const downloadOrderInvoice = async (
+  id: number | string,
+  orderNumber?: string,
+): Promise<void> => {
+  const res = await api.get(`/orders/${id}/invoice/`, { responseType: 'blob' });
+  const url = window.URL.createObjectURL(res.data as Blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `invoice-${orderNumber || `order-${id}`}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(url);
+};
+
+// --- Delivery bill (admin-only) -------------------------------------------
+// The courier/delivery receipt an admin stores against an order. The file is
+// never exposed via a public storage URL — it is uploaded to and streamed from
+// a staff-gated endpoint. Only staff can reach any of these.
+
+export const uploadDeliveryBill = (id: number | string, file: File) => {
+  const form = new FormData();
+  form.append('file', file);
+  return api.post<{
+    success: boolean;
+    has_delivery_bill: boolean;
+    delivery_bill_uploaded_at: string;
+  }>(`/orders/${id}/delivery_bill/`, form);
+};
+
+export const deleteDeliveryBill = (id: number | string) =>
+  api.delete(`/orders/${id}/delivery_bill/`);
+
+// Fetch the stored delivery bill as a blob and open it in a new browser tab so
+// the admin can view (and print/save) it. Streamed through the auth cookie.
+export const viewDeliveryBill = async (id: number | string): Promise<void> => {
+  const res = await api.get(`/orders/${id}/delivery_bill/`, { responseType: 'blob' });
+  const url = window.URL.createObjectURL(res.data as Blob);
+  window.open(url, '_blank', 'noopener');
+  // Revoke after a delay so the new tab has time to load the object URL.
+  setTimeout(() => window.URL.revokeObjectURL(url), 60_000);
+};

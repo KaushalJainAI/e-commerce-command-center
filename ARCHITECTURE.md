@@ -102,15 +102,18 @@ PENDING → CONFIRMED → PROCESSING → SHIPPED → DELIVERED → CANCELLED
 ```
 Admin updates status via a dropdown in the order detail view.
 
-### 4. Homepage Sections (Admin-Ordered)
+### 4. Homepage Sections (Django admin, for now)
 
-The **Sections** page uses `django-admin-sortable2` on the backend. Admins can drag
-products within a section to set their display order. The `position` column on
-`ProductSection` persists this order.
+Homepage sections use `django-admin-sortable2` on the backend: admins drag
+products within a section to set display order (`position` on `ProductSection`).
+There is no Sections page in this panel yet — products can be *placed into*
+sections from the product dialog, but sections themselves are created/ordered in
+the Django admin.
 
-### 5. Policy Pages (Shipping/Return)
+### 5. Policy Pages (Shipping/Return — no panel page yet)
 
-Policies may not exist initially:
+The backend `PolicyViewSet` supports PUT-upsert; a future panel page would fetch
+like this (policies may not exist initially):
 ```typescript
 const fetchPolicy = async () => {
   try {
@@ -164,17 +167,19 @@ avoid expensive aggregations on every page load.
 | Page | Manages |
 |------|---------|
 | Dashboard | Stats overview, recent orders |
-| Products | Product CRUD + gallery images |
+| Insights | Sales / funnel / search / customer / anonymous-traffic analytics (recharts) |
+| Products | Product CRUD + gallery images + variants + homepage-section placement; client-side search/filter/sort |
 | Combos | Combo CRUD + product items |
-| Categories | Category CRUD |
-| Sections | Homepage section product ordering |
-| Orders | Order list, status updates |
+| Orders | Order list (server-side search/filter/sort/pagination incl. date range), status updates, invoice download, delivery bill upload |
+| Recycle Bin | Soft-deleted orders; restore |
 | Coupons | Discount code CRUD |
 | Conversations | All customer chat threads (AI + human); admin reply, status management |
 | Contact | Contact form submissions |
-| Shipping Policy | Editable policy content |
-| Return Policy | Editable policy content |
 | Admin Info | Admin account settings |
+
+> Categories are edited inline via the Products page's category select (CRUD API
+> exists but has no dedicated page yet); homepage **sections** and **policy pages**
+> are currently managed in the Django admin, not this panel.
 
 ---
 

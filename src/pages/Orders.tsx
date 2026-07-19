@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
-import { getOrders, updateOrder, deleteOrder, cancelOrder, Order, OrderStatus, OrderFilters, PaymentMethod } from '@/api/orders';
+import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { getOrders, updateOrder, deleteOrder, cancelOrder, downloadOrderInvoice, downloadPackingSlip, uploadDeliveryBill, deleteDeliveryBill, viewDeliveryBill, Order, OrderStatus, OrderFilters, PaymentMethod } from '@/api/orders';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -22,9 +23,24 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { Edit, Trash2, Filter, Eye, Ban } from 'lucide-react';
+import { Edit, Trash2, Filter, Eye, Ban, FileDown, Upload, Receipt, MessageCircle, Printer, Download } from 'lucide-react';
+import { exportOrdersCsv } from '@/api/bulk';
+import { PageHelp } from '@/components/PageHelp';
 
 const PAGE_SIZE = 12; // must match backend REST_FRAMEWORK PAGE_SIZE
+
+// The backend runs in IST (TIME_ZONE='Asia/Kolkata') and filters orders on
+// created_at__date in that timezone, so the date presets must be built from the
+// IST calendar day — not the browser/UTC day, which would be off by one for
+// admins working near midnight. `en-CA` formats as YYYY-MM-DD.
+const IST_TODAY = () =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
+const istDateDaysAgo = (days: number) => {
+  const [y, m, d] = IST_TODAY().split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() - days);
+  return dt.toISOString().slice(0, 10);
+};
 
 const Orders = () => {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -34,7 +50,22 @@ const Orders = () => {
   const [viewingOrder, setViewingOrder] = useState<Order | null>(null);
   const [trackingInput, setTrackingInput] = useState('');
   const [savingTracking, setSavingTracking] = useState(false);
-  const [filters, setFilters] = useState<OrderFilters>({});
+  const [downloadingId, setDownloadingId] = useState<number | null>(null);
+  const [downloadingSlipId, setDownloadingSlipId] = useState<number | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [uploadingBill, setUploadingBill] = useState(false);
+  const billInputRef = useRef<HTMLInputElement>(null);
+  // Dashboard action buttons deep-link here with e.g. /orders?status=pending —
+  // seed the initial filters from the URL so the list arrives pre-filtered.
+  const [searchParams] = useSearchParams();
+  const [filters, setFilters] = useState<OrderFilters>(() => {
+    const initial: OrderFilters = {};
+    const status = searchParams.get('status');
+    if (status) initial.status = status as OrderStatus;
+    const search = searchParams.get('search');
+    if (search) initial.search = search;
+    return initial;
+  });
   const [page, setPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   const { toast } = useToast();
@@ -82,8 +113,9 @@ const Orders = () => {
 
   const handleUpdateStatus = async (orderId: number, status: OrderStatus) => {
     try {
-      await updateOrder(orderId, { status });
+      const { data } = await updateOrder(orderId, { status });
       toast({ title: 'Success', description: 'Order status updated' });
+      setViewingOrder((prev) => (prev && prev.id === orderId ? { ...prev, status: data.status } : prev));
       fetchOrders();
     } catch (error) {
       toast({
@@ -92,6 +124,57 @@ const Orders = () => {
         variant: 'destructive',
       });
     }
+  };
+
+  // One-button workflow: each status has exactly one sensible next step, so the
+  // admin never has to pick from a 7-option dropdown (that lives under
+  // "Advanced" in the order dialog for corrections only).
+  const NEXT_STATUS: Partial<Record<OrderStatus, OrderStatus>> = {
+    pending: 'confirmed',
+    confirmed: 'processing',
+    processing: 'shipped',
+    shipped: 'delivering',
+    delivering: 'delivered',
+  };
+  const NEXT_STEP_LABEL: Partial<Record<OrderStatus, string>> = {
+    confirmed: 'Confirm order',
+    processing: 'Start packing',
+    shipped: 'Mark as shipped',
+    delivering: 'Out for delivery',
+    delivered: 'Mark as delivered',
+  };
+  const NEXT_STEP_SENTENCE: Partial<Record<OrderStatus, string>> = {
+    confirmed: 'confirm this order? The customer will get an email that you are preparing it.',
+    processing: 'start packing this order?',
+    shipped: 'mark this order as shipped? The customer will be emailed.',
+    delivering: 'mark this order as out for delivery?',
+    delivered: 'mark this order as delivered? This completes the order.',
+  };
+
+  const handleAdvanceStatus = async (order: Order) => {
+    const next = NEXT_STATUS[order.status];
+    if (!next) return;
+    if (!confirm(`${order.order_number} — do you want to ${NEXT_STEP_SENTENCE[next] || `move this order to "${next}"?`}`)) return;
+    await handleUpdateStatus(order.id, next);
+  };
+
+  // Click-to-WhatsApp: opens a chat with the customer, message pre-filled from
+  // the order's current status. Pure link — no WhatsApp API involved.
+  const waLink = (order: Order) => {
+    const digits = (order.phone_number || '').replace(/\D/g, '');
+    if (!digits) return null;
+    const withCc = digits.length === 10 ? `91${digits}` : digits;
+    const tracking = (order.tracking_number || '').trim();
+    let text: string;
+    if (order.status === 'shipped' || order.status === 'delivering') {
+      text = `Hello! Your Nidhi Masala order ${order.order_number} is on its way.` +
+        (tracking ? ` Tracking ID: ${tracking}.` : '') + ' Thank you for shopping with us!';
+    } else if (order.status === 'delivered') {
+      text = `Hello! Your Nidhi Masala order ${order.order_number} has been delivered. We hope you enjoy it!`;
+    } else {
+      text = `Hello! Thank you for your Nidhi Masala order ${order.order_number}. We are preparing it and will update you soon.`;
+    }
+    return `https://wa.me/${withCc}?text=${encodeURIComponent(text)}`;
   };
 
   const handleCancelOrder = async (id: number) => {
@@ -127,10 +210,126 @@ const Orders = () => {
     }
   };
 
+  // Download the GST tax invoice / bill PDF for an order. Reuses the same
+  // backend endpoint the storefront uses; staff access is enforced server-side.
+  const handleDownloadInvoice = async (order: Order) => {
+    try {
+      setDownloadingId(order.id);
+      await downloadOrderInvoice(order.id, order.order_number);
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error && error.message ? error.message : 'Failed to download bill',
+        variant: 'destructive',
+      });
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
+  // Export the CURRENTLY FILTERED order list to CSV (the server applies the
+  // same filters), so "export what I'm looking at" just works.
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const params: Record<string, string | number> = {};
+      if (filters.status) params.status = filters.status;
+      if (filters.paymentMethod) params.payment_method = filters.paymentMethod;
+      if (filters.minAmount != null) params.min_amount = filters.minAmount;
+      if (filters.maxAmount != null) params.max_amount = filters.maxAmount;
+      if (filters.dateFrom) params.date_from = filters.dateFrom;
+      if (filters.dateTo) params.date_to = filters.dateTo;
+      if (filters.sortBy) params.ordering = filters.sortBy;
+      if (filters.search?.trim()) params.search = filters.search.trim();
+      await exportOrdersCsv(params);
+    } catch {
+      toast({ title: 'Error', description: 'Failed to export orders', variant: 'destructive' });
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleDownloadPackingSlip = async (order: Order) => {
+    try {
+      setDownloadingSlipId(order.id);
+      await downloadPackingSlip(order.id, order.order_number);
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error && error.message ? error.message : 'Failed to download packing slip',
+        variant: 'destructive',
+      });
+    } finally {
+      setDownloadingSlipId(null);
+    }
+  };
+
   const openViewDialog = (order: Order) => {
     setViewingOrder(order);
     setTrackingInput(order.tracking_number || '');
     setDialogOpen(true);
+  };
+
+  // --- Delivery bill (admin-only) ---
+  // Upload/replace the courier receipt for the order currently open in the
+  // dialog. The file is stored privately and only ever streamed back to staff.
+  const handleUploadBill = async (file: File) => {
+    if (!viewingOrder) return;
+    try {
+      setUploadingBill(true);
+      const { data } = await uploadDeliveryBill(viewingOrder.id, file);
+      const updated: Order = {
+        ...viewingOrder,
+        has_delivery_bill: true,
+        delivery_bill_uploaded_at: data.delivery_bill_uploaded_at,
+      };
+      setViewingOrder(updated);
+      setOrders((prev) => prev.map((o) => (o.id === updated.id ? updated : o)));
+      toast({ title: 'Uploaded', description: 'Delivery bill saved.' });
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error && error.message ? error.message : 'Failed to upload delivery bill',
+        variant: 'destructive',
+      });
+    } finally {
+      setUploadingBill(false);
+      if (billInputRef.current) billInputRef.current.value = '';
+    }
+  };
+
+  const handleViewBill = async (order: Order) => {
+    try {
+      await viewDeliveryBill(order.id);
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error && error.message ? error.message : 'Failed to open delivery bill',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleDeleteBill = async () => {
+    if (!viewingOrder) return;
+    if (!confirm('Remove the uploaded delivery bill for this order?')) return;
+    try {
+      await deleteDeliveryBill(viewingOrder.id);
+      const updated: Order = {
+        ...viewingOrder,
+        has_delivery_bill: false,
+        delivery_bill_uploaded_at: null,
+      };
+      setViewingOrder(updated);
+      setOrders((prev) => prev.map((o) => (o.id === updated.id ? updated : o)));
+      toast({ title: 'Removed', description: 'Delivery bill deleted.' });
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error instanceof Error && error.message ? error.message : 'Failed to remove delivery bill',
+        variant: 'destructive',
+      });
+    }
   };
 
   const handleSaveTracking = async () => {
@@ -176,12 +375,17 @@ const Orders = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold">Orders</h1>
-          <p className="text-muted-foreground">Manage customer orders</p>
-        </div>
-        <div className="flex items-center gap-2">
+      <div>
+        <h1 className="text-3xl font-bold">Orders</h1>
+        <p className="text-muted-foreground">Manage customer orders</p>
+      </div>
+      <PageHelp>
+        Every order is here. Use the green "Next step" button on each order to move
+        it forward (Confirm → Pack → Ship → Deliver). Tap an order to see its
+        items, print a packing slip, or message the customer on WhatsApp.
+      </PageHelp>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-4">
+        <div className="flex flex-wrap items-center gap-2">
           <Input
             placeholder="Search order # / customer…"
             className="w-56"
@@ -191,6 +395,10 @@ const Orders = () => {
           <Button variant="outline" onClick={() => setFilterOpen(true)}>
             <Filter className="mr-2 h-4 w-4" />
             Filter & Sort
+          </Button>
+          <Button variant="outline" onClick={handleExport} disabled={exporting}>
+            <Download className="mr-2 h-4 w-4" />
+            {exporting ? 'Preparing…' : 'Export'}
           </Button>
         </div>
       </div>
@@ -234,30 +442,35 @@ const Orders = () => {
                     <TableCell className="font-medium">₹{parseFloat(String(order.total || 0)).toFixed(2)}</TableCell>
                     <TableCell className="capitalize">{order.payment_method || 'N/A'}</TableCell>
                     <TableCell>
-                      <Select
-                        value={order.status}
-                        onValueChange={(value: OrderStatus) => handleUpdateStatus(order.id, value)}
-                      >
-                        <SelectTrigger className="w-32">
-                          <span className={`px-2 py-1 rounded text-xs ${getStatusBadgeColor(order.status)}`}>
-                            {order.status}
-                          </span>
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="pending">Pending</SelectItem>
-                          <SelectItem value="confirmed">Confirmed</SelectItem>
-                          <SelectItem value="processing">Processing</SelectItem>
-                          <SelectItem value="shipped">Shipped</SelectItem>
-                          <SelectItem value="delivering">Delivering</SelectItem>
-                          <SelectItem value="delivered">Delivered</SelectItem>
-                          <SelectItem value="cancelled">Cancelled</SelectItem>
-                        </SelectContent>
-                      </Select>
+                      <div className="flex flex-col items-start gap-1">
+                        <span className={`px-2 py-1 rounded text-xs ${getStatusBadgeColor(order.status)}`}>
+                          {order.status}
+                        </span>
+                        {NEXT_STATUS[order.status] && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() => handleAdvanceStatus(order)}
+                          >
+                            {NEXT_STEP_LABEL[NEXT_STATUS[order.status]!]} →
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell>{new Date(order.created_at).toLocaleDateString()}</TableCell>
                     <TableCell className="text-right">
                       <Button variant="ghost" size="icon" onClick={() => openViewDialog(order)} title="View order">
                         <Eye className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleDownloadInvoice(order)}
+                        disabled={downloadingId === order.id}
+                        title="Download bill (PDF tax invoice)"
+                      >
+                        <FileDown className="h-4 w-4 text-primary" />
                       </Button>
                       <Button
                         variant="ghost"
@@ -369,6 +582,49 @@ const Orders = () => {
                 </SelectContent>
               </Select>
             </div>
+            <div>
+              <Label>Order Date</Label>
+              <div className="flex flex-wrap gap-2 mt-1 mb-2">
+                {([
+                  { label: 'Today', days: 0 },
+                  { label: 'Last 7 days', days: 6 },
+                  { label: 'Last 30 days', days: 29 },
+                ] as const).map(({ label, days }) => {
+                  const to = IST_TODAY();
+                  const from = istDateDaysAgo(days);
+                  const active = filters.dateFrom === from && filters.dateTo === to;
+                  return (
+                    <Button
+                      key={label}
+                      type="button"
+                      size="sm"
+                      variant={active ? 'default' : 'outline'}
+                      onClick={() => updateFilters({ ...filters, dateFrom: from, dateTo: to })}
+                    >
+                      {label}
+                    </Button>
+                  );
+                })}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-xs text-muted-foreground">From</Label>
+                  <Input
+                    type="date"
+                    value={filters.dateFrom || ''}
+                    onChange={(e) => updateFilters({ ...filters, dateFrom: e.target.value || undefined })}
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground">To</Label>
+                  <Input
+                    type="date"
+                    value={filters.dateTo || ''}
+                    onChange={(e) => updateFilters({ ...filters, dateTo: e.target.value || undefined })}
+                  />
+                </div>
+              </div>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <Label>Min Amount</Label>
@@ -430,7 +686,60 @@ const Orders = () => {
                   <p className="font-medium">{viewingOrder.payment_method || 'N/A'}</p>
                 </div>
               </div>
-              
+
+              {/* The one obvious next action for this order. */}
+              <div className="flex flex-wrap gap-2">
+                {NEXT_STATUS[viewingOrder.status] && (
+                  <Button onClick={() => handleAdvanceStatus(viewingOrder)}>
+                    {NEXT_STEP_LABEL[NEXT_STATUS[viewingOrder.status]!]} →
+                  </Button>
+                )}
+                {waLink(viewingOrder) && (
+                  <Button asChild variant="outline" className="text-green-700 border-green-300">
+                    <a href={waLink(viewingOrder)!} target="_blank" rel="noreferrer">
+                      <MessageCircle className="mr-2 h-4 w-4" />
+                      WhatsApp customer
+                    </a>
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  onClick={() => handleDownloadPackingSlip(viewingOrder)}
+                  disabled={downloadingSlipId === viewingOrder.id}
+                >
+                  <Printer className="mr-2 h-4 w-4" />
+                  {downloadingSlipId === viewingOrder.id ? 'Preparing…' : 'Packing slip'}
+                </Button>
+              </div>
+
+              {/* Rare corrections only — hidden so the everyday flow stays one button. */}
+              <details className="rounded-md border p-3">
+                <summary className="cursor-pointer text-sm text-muted-foreground">
+                  Advanced: set status manually
+                </summary>
+                <div className="mt-2 max-w-xs">
+                  <Select
+                    value={viewingOrder.status}
+                    onValueChange={(value: OrderStatus) => handleUpdateStatus(viewingOrder.id, value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="pending">Pending</SelectItem>
+                      <SelectItem value="confirmed">Confirmed</SelectItem>
+                      <SelectItem value="processing">Processing</SelectItem>
+                      <SelectItem value="shipped">Shipped</SelectItem>
+                      <SelectItem value="delivering">Delivering</SelectItem>
+                      <SelectItem value="delivered">Delivered</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Use only to correct a mistake. To cancel, use the cancel button in the list.
+                  </p>
+                </div>
+              </details>
+
               <div>
                 <Label className="text-muted-foreground">Shipping Address</Label>
                 <p className="font-medium">{viewingOrder.shipping_address}</p>
@@ -460,6 +769,60 @@ const Orders = () => {
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">
                   Saving a tracking number emails the customer that their order has shipped.
+                </p>
+              </div>
+
+              {/* Delivery bill — admin-only. Stored privately; never shown to the customer. */}
+              <div>
+                <Label className="text-muted-foreground">Delivery Bill (admin only)</Label>
+                <input
+                  ref={billInputRef}
+                  type="file"
+                  accept="application/pdf,image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleUploadBill(file);
+                  }}
+                />
+                <div className="flex flex-wrap gap-2 mt-1">
+                  {viewingOrder.has_delivery_bill ? (
+                    <>
+                      <Button variant="outline" size="sm" onClick={() => handleViewBill(viewingOrder)}>
+                        <Receipt className="mr-2 h-4 w-4" />
+                        View Bill
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => billInputRef.current?.click()}
+                        disabled={uploadingBill}
+                      >
+                        <Upload className="mr-2 h-4 w-4" />
+                        {uploadingBill ? 'Uploading…' : 'Replace'}
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={handleDeleteBill} className="text-destructive">
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Remove
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => billInputRef.current?.click()}
+                      disabled={uploadingBill}
+                    >
+                      <Upload className="mr-2 h-4 w-4" />
+                      {uploadingBill ? 'Uploading…' : 'Upload Bill'}
+                    </Button>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {viewingOrder.has_delivery_bill && viewingOrder.delivery_bill_uploaded_at
+                    ? `Uploaded ${new Date(viewingOrder.delivery_bill_uploaded_at).toLocaleString('en-IN')}. `
+                    : ''}
+                  PDF, JPG, PNG or WebP (max 10 MB). Only visible to admins.
                 </p>
               </div>
 
@@ -501,6 +864,16 @@ const Orders = () => {
             </div>
           )}
           <DialogFooter>
+            {viewingOrder && (
+              <Button
+                variant="outline"
+                onClick={() => handleDownloadInvoice(viewingOrder)}
+                disabled={downloadingId === viewingOrder.id}
+              >
+                <FileDown className="mr-2 h-4 w-4" />
+                {downloadingId === viewingOrder.id ? 'Downloading…' : 'Download Bill'}
+              </Button>
+            )}
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
               Close
             </Button>
