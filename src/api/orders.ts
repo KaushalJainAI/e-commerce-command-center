@@ -14,6 +14,27 @@ export interface OrderItem {
   total: number;
 }
 
+export type PaymentInstrument = 'upi' | 'card' | 'netbanking' | 'wallet' | string;
+
+// Razorpay payment detail for an order. Admin-only — the backend returns null
+// for non-staff requests and for orders with no gateway payment (e.g. COD).
+// Instrument fields are populated from the Razorpay webhook, so they may be null
+// for payments captured before this was introduced or still in flight.
+export interface OrderPayment {
+  gateway: string;
+  status: string;
+  razorpay_payment_id: string | null;
+  method: PaymentInstrument | null;
+  vpa?: string | null;
+  card_last4?: string | null;
+  card_network?: string | null;
+  card_type?: string | null;
+  bank?: string | null;
+  wallet?: string | null;
+  failure_code: string | null;
+  failure_reason: string | null;
+}
+
 // Order interface matching backend OrderListSerializer / OrderDetailSerializer
 export interface Order {
   id: number;
@@ -29,6 +50,8 @@ export interface Order {
   shipping_address: string;
   phone_number?: string;
   payment_method?: PaymentMethod;
+  payment_status?: string;
+  payment?: OrderPayment | null;
   tracking_number?: string;
   coupon_code?: string;
   created_at: string;

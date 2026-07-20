@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { getOrders, updateOrder, deleteOrder, cancelOrder, downloadOrderInvoice, downloadPackingSlip, uploadDeliveryBill, deleteDeliveryBill, viewDeliveryBill, Order, OrderStatus, OrderFilters, PaymentMethod } from '@/api/orders';
+import { getOrders, updateOrder, deleteOrder, cancelOrder, downloadOrderInvoice, downloadPackingSlip, uploadDeliveryBill, deleteDeliveryBill, viewDeliveryBill, Order, OrderStatus, OrderFilters, PaymentMethod, OrderPayment } from '@/api/orders';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -40,6 +40,38 @@ const istDateDaysAgo = (days: number) => {
   const dt = new Date(Date.UTC(y, m - 1, d));
   dt.setUTCDate(dt.getUTCDate() - days);
   return dt.toISOString().slice(0, 10);
+};
+
+// Human-readable "how they paid" line from the Razorpay instrument fields.
+// Returns null when the webhook hasn't told us the method yet (payment still in
+// flight, or captured before instrument capture was introduced).
+const formatInstrument = (payment: OrderPayment): string | null => {
+  switch (payment.method) {
+    case 'upi':
+      return payment.vpa ? `UPI — ${payment.vpa}` : 'UPI';
+    case 'card': {
+      const parts = [payment.card_network, payment.card_type].filter(Boolean).join(' ');
+      const masked = payment.card_last4 ? `•••• ${payment.card_last4}` : '';
+      return ['Card', masked, parts && `(${parts})`].filter(Boolean).join(' ');
+    }
+    case 'netbanking':
+      return payment.bank ? `Net Banking — ${payment.bank}` : 'Net Banking';
+    case 'wallet':
+      return payment.wallet ? `Wallet — ${payment.wallet}` : 'Wallet';
+    default:
+      // Razorpay also sends emi / paylater / cardless_emi / bank_transfer / nach.
+      // Present them readably rather than as raw snake_case.
+      return payment.method
+        ? payment.method.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+        : null;
+  }
+};
+
+const PAYMENT_STATUS_COLOR: Record<string, string> = {
+  completed: 'bg-green-100 text-green-800',
+  pending: 'bg-yellow-100 text-yellow-800',
+  failed: 'bg-red-100 text-red-800',
+  refunded: 'bg-blue-100 text-blue-800',
 };
 
 const Orders = () => {
@@ -686,6 +718,62 @@ const Orders = () => {
                   <p className="font-medium">{viewingOrder.payment_method || 'N/A'}</p>
                 </div>
               </div>
+
+              {/* Razorpay payment detail — admin-only, populated from the webhook.
+                  Absent for COD orders, which have no gateway payment row. */}
+              {viewingOrder.payment && (
+                <div className="rounded-md border p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="text-muted-foreground">Payment Details</Label>
+                    <span
+                      className={`px-2 py-1 rounded text-xs capitalize ${
+                        PAYMENT_STATUS_COLOR[viewingOrder.payment.status] ||
+                        'bg-gray-100 text-gray-800'
+                      }`}
+                    >
+                      {viewingOrder.payment.status}
+                    </span>
+                  </div>
+
+                  {formatInstrument(viewingOrder.payment) && (
+                    <div>
+                      {/* "Paid via" would be a lie on a failed/pending payment —
+                          the customer only attempted that method. */}
+                      <span className="text-xs text-muted-foreground">
+                        {viewingOrder.payment.status === 'completed' ||
+                        viewingOrder.payment.status === 'refunded'
+                          ? 'Paid via'
+                          : 'Attempted via'}
+                      </span>
+                      <p className="font-medium">{formatInstrument(viewingOrder.payment)}</p>
+                    </div>
+                  )}
+
+                  {viewingOrder.payment.razorpay_payment_id && (
+                    <div>
+                      <span className="text-xs text-muted-foreground">Transaction ID</span>
+                      <p className="font-mono text-sm break-all">
+                        {viewingOrder.payment.razorpay_payment_id}
+                      </p>
+                    </div>
+                  )}
+
+                  {viewingOrder.payment.status === 'failed' &&
+                    viewingOrder.payment.failure_reason && (
+                      <div>
+                        <span className="text-xs text-muted-foreground">Failure reason</span>
+                        <p className="text-sm text-red-700">
+                          {viewingOrder.payment.failure_reason}
+                        </p>
+                        {viewingOrder.payment.failure_code && (
+                          <p className="text-xs text-muted-foreground">
+                            {viewingOrder.payment.failure_code}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                </div>
+              )}
 
               {/* The one obvious next action for this order. */}
               <div className="flex flex-wrap gap-2">

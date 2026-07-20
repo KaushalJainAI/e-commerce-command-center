@@ -68,8 +68,11 @@ Create `.env.local`:
 
 ```env
 VITE_API_URL=http://localhost:8000/api
-VITE_GOOGLE_CLIENT_ID=your_google_client_id
 ```
+
+> The admin panel authenticates with **email + password only** (`src/pages/Login.tsx`).
+> There is no Google sign-in here — `VITE_GOOGLE_CLIENT_ID` is not used. Only the
+> customer storefront (`Frontend/nidhi-brand-forge`) needs it.
 
 ## Pages
 
