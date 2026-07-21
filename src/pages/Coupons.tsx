@@ -255,14 +255,14 @@ const Coupons = () => {
                 placeholder="SAVE20"
                 className="font-mono"
               />
-              <p className="text-xs text-muted-foreground mt-1">
-                Verify a code exists and is redeemable (active, not expired, under its usage limit).
-              </p>
             </div>
             <Button type="button" onClick={handleCheckCode} disabled={checking || !checkCode.trim()}>
               {checking ? 'Checking…' : 'Check'}
             </Button>
           </div>
+          <p className="text-xs text-muted-foreground mt-2">
+            Verify a code exists and is redeemable (active, not expired, under its usage limit).
+          </p>
         </CardContent>
       </Card>
 

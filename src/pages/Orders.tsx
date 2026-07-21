@@ -565,14 +565,14 @@ const Orders = () => {
             <div>
               <Label>Status</Label>
               <Select
-                value={filters.status || ''}
-                onValueChange={(value) => updateFilters({ ...filters, status: value as OrderStatus || undefined })}
+                value={filters.status || 'all'}
+                onValueChange={(value) => updateFilters({ ...filters, status: (value === 'all' ? undefined : value as OrderStatus) })}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="All statuses" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All</SelectItem>
+                  <SelectItem value="all">All</SelectItem>
                   <SelectItem value="pending">Pending</SelectItem>
                   <SelectItem value="confirmed">Confirmed</SelectItem>
                   <SelectItem value="processing">Processing</SelectItem>
@@ -586,14 +586,14 @@ const Orders = () => {
             <div>
               <Label>Payment Method</Label>
               <Select
-                value={filters.paymentMethod || ''}
-                onValueChange={(value) => updateFilters({ ...filters, paymentMethod: (value as PaymentMethod) || undefined })}
+                value={filters.paymentMethod || 'all'}
+                onValueChange={(value) => updateFilters({ ...filters, paymentMethod: (value === 'all' ? undefined : value as PaymentMethod) })}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="All methods" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All</SelectItem>
+                  <SelectItem value="all">All</SelectItem>
                   <SelectItem value="COD">COD</SelectItem>
                   <SelectItem value="ONLINE">Online</SelectItem>
                 </SelectContent>
@@ -601,12 +601,12 @@ const Orders = () => {
             </div>
             <div>
               <Label>Sort By</Label>
-              <Select value={filters.sortBy || ''} onValueChange={(value) => updateFilters({ ...filters, sortBy: value as any || undefined })}>
+              <Select value={filters.sortBy || 'default'} onValueChange={(value) => updateFilters({ ...filters, sortBy: (value === 'default' ? undefined : value as any) })}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select sorting" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Default</SelectItem>
+                  <SelectItem value="default">Default</SelectItem>
                   <SelectItem value="newest">Newest First</SelectItem>
                   <SelectItem value="oldest">Oldest First</SelectItem>
                   <SelectItem value="highestTotal">Highest Total</SelectItem>

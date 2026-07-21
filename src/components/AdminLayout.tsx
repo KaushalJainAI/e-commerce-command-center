@@ -2,7 +2,6 @@ import { Outlet } from 'react-router-dom';
 import { SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { AdminSidebar } from './AdminSidebar';
 import { GlobalSearch } from './GlobalSearch';
-import { AskAssistant } from './AskAssistant';
 
 const AdminLayout = () => {
   return (
@@ -19,7 +18,6 @@ const AdminLayout = () => {
             <Outlet />
           </main>
         </div>
-        <AskAssistant />
       </div>
     </SidebarProvider>
   );

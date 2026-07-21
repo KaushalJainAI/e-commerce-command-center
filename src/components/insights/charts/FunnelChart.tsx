@@ -30,7 +30,7 @@ interface Props {
 export const FunnelChart = ({ stages, color = '#6366f1' }: Props) => (
   <div className="flex h-full flex-col justify-center gap-3 py-2">
     {stages.map((s, i) => {
-      const width = s.pct_of_top ?? 0;
+      const width = Math.min(s.pct_of_top ?? 0, 100);
       return (
         <div key={s.stage}>
           <div className="mb-1 flex items-center justify-between text-sm">

@@ -310,19 +310,28 @@ const ContactSubmissions = () => {
               Add notes about your reply. This will also mark the submission as replied.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="reply-notes">Admin Notes</Label>
-              <Textarea
-                id="reply-notes"
-                value={replyNotes}
-                onChange={(e) => setReplyNotes(e.target.value)}
-                placeholder="e.g., Replied via email on 25 Dec..."
-                rows={4}
-              />
-            </div>
+          <div className="space-y-2 py-2">
+            <Label htmlFor="reply-notes">Admin Notes</Label>
+            <Textarea
+              id="reply-notes"
+              value={replyNotes}
+              onChange={(e) => setReplyNotes(e.target.value)}
+              placeholder="e.g., Replied via email on 25 Dec..."
+              rows={6}
+              className="min-h-[140px] resize-y"
+            />
           </div>
           <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              className="gap-1.5 sm:mr-auto"
+              onClick={() => setReplyNotes('')}
+              disabled={!replyNotes}
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              Reset
+            </Button>
             <Button variant="outline" onClick={() => setReplyDialogOpen(false)}>Cancel</Button>
             <Button onClick={handleReply}>Save Reply</Button>
           </DialogFooter>
