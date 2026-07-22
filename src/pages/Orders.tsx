@@ -562,7 +562,7 @@ const Orders = () => {
             <DialogTitle>Filter & Sort Orders</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <div>
+            <div className="space-y-1.5">
               <Label>Status</Label>
               <Select
                 value={filters.status || 'all'}
@@ -583,7 +583,7 @@ const Orders = () => {
                 </SelectContent>
               </Select>
             </div>
-            <div>
+            <div className="space-y-1.5">
               <Label>Payment Method</Label>
               <Select
                 value={filters.paymentMethod || 'all'}
@@ -599,7 +599,7 @@ const Orders = () => {
                 </SelectContent>
               </Select>
             </div>
-            <div>
+            <div className="space-y-1.5">
               <Label>Sort By</Label>
               <Select value={filters.sortBy || 'default'} onValueChange={(value) => updateFilters({ ...filters, sortBy: (value === 'default' ? undefined : value as any) })}>
                 <SelectTrigger>
@@ -614,7 +614,7 @@ const Orders = () => {
                 </SelectContent>
               </Select>
             </div>
-            <div>
+            <div className="space-y-1.5">
               <Label>Order Date</Label>
               <div className="flex flex-wrap gap-2 mt-1 mb-2">
                 {([
@@ -658,7 +658,7 @@ const Orders = () => {
               </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
+              <div className="space-y-1.5">
                 <Label>Min Amount</Label>
                 <Input
                   type="number"
@@ -667,7 +667,7 @@ const Orders = () => {
                   onChange={(e) => updateFilters({ ...filters, minAmount: parseFloat(e.target.value) || undefined })}
                 />
               </div>
-              <div>
+              <div className="space-y-1.5">
                 <Label>Max Amount</Label>
                 <Input
                   type="number"
