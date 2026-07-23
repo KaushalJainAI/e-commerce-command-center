@@ -98,36 +98,23 @@ await createProductImage(productId, file, altText);
 
 Orders follow this workflow:
 ```
-PENDING → CONFIRMED → PROCESSING → SHIPPED → DELIVERED → CANCELLED
+PENDING → CONFIRMED → PROCESSING → SHIPPED → (DELIVERING) → DELIVERED
 ```
+`CANCELLED` is a terminal branch, not the end of the chain. `DELIVERING` is an
+intermediate state used by some delivery integrations (between SHIPPED and DELIVERED).
 Admin updates status via a dropdown in the order detail view.
 
-### 4. Homepage Sections (Django admin, for now)
+### 4. Homepage Sections
 
-Homepage sections use `django-admin-sortable2` on the backend: admins drag
-products within a section to set display order (`position` on `ProductSection`).
-There is no Sections page in this panel yet — products can be *placed into*
-sections from the product dialog, but sections themselves are created/ordered in
-the Django admin.
+The **Sections** page (`/sections`) manages homepage sections and the products placed
+in each (`position` on `ProductSectionPlacement` for ordering). Products can also be
+placed into sections from the product dialog.
 
 ### 5. Policy Pages (Shipping/Return — no panel page yet)
 
-The backend `PolicyViewSet` supports PUT-upsert; a future panel page would fetch
-like this (policies may not exist initially):
-```typescript
-const fetchPolicy = async () => {
-  try {
-    const response = await getPolicy('shipping');
-    setContent(response.data.content);
-  } catch (error) {
-    if (error?.response?.status === 404) {
-      setNotConfigured(true);
-      setContent('');  // Empty editor for creation
-    }
-  }
-};
-```
-Saving to a non-existent policy auto-creates it (PUT upsert).
+The backend `PolicyViewSet` supports PUT-upsert (saving a non-existent policy
+auto-creates it), but this panel has **no** dedicated policy-editing page — policies
+are currently edited in the Django admin.
 
 ### 6. Conversations (Chat Support)
 
@@ -169,17 +156,24 @@ avoid expensive aggregations on every page load.
 | Dashboard | Stats overview, recent orders |
 | Insights | Sales / funnel / search / customer / anonymous-traffic analytics (recharts) |
 | Products | Product CRUD + gallery images + variants + homepage-section placement; client-side search/filter/sort |
+| Bulk Edit | Spreadsheet-style bulk product edits + CSV import/export |
 | Combos | Combo CRUD + product items |
-| Orders | Order list (server-side search/filter/sort/pagination incl. date range), status updates, invoice download, delivery bill upload |
+| Categories | Category CRUD (dedicated page) |
+| Sections | Homepage section CRUD + product placement/ordering |
+| Orders | Order list (server-side search/filter/sort/pagination incl. date range), status updates, invoice + packing-slip download, delivery-bill upload, Razorpay payment-instrument details |
+| Reviews | Review moderation — hide/unhide (`is_hidden`) |
+| Customers | Customer list + per-customer detail (orders, spend) |
 | Recycle Bin | Soft-deleted orders; restore |
 | Coupons | Discount code CRUD |
 | Conversations | All customer chat threads (AI + human); admin reply, status management |
 | Contact | Contact form submissions |
 | Admin Info | Admin account settings |
 
-> Categories are edited inline via the Products page's category select (CRUD API
-> exists but has no dedicated page yet); homepage **sections** and **policy pages**
-> are currently managed in the Django admin, not this panel.
+> Homepage **policy pages** are still managed in the Django admin (no panel page).
+> A **global search** (`components/GlobalSearch.tsx` → `GET /api/admin-search/`) spans
+> catalog/orders/customers from the top bar, and an **ask-assistant** widget
+> (`api/assistant.ts` → `POST /api/assistant/admin-chat/`) answers business-data
+> questions from a read-only reporting persona.
 
 ---
 
