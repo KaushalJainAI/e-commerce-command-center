@@ -14,7 +14,11 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
-import { RotateCcw, Loader2 } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { RotateCcw, Loader2, AlertTriangle } from 'lucide-react';
+
+// Keep in sync with the backend RECYCLE_BIN_RETENTION_DAYS setting.
+const RETENTION_DAYS = 30;
 
 const RecycleBin = () => {
   const [inactiveProducts, setInactiveProducts] = useState<Product[]>([]);
@@ -123,6 +127,17 @@ const RecycleBin = () => {
           Restore deactivated products &amp; combos, and soft-deleted orders.
         </p>
       </div>
+
+      <Alert variant="destructive">
+        <AlertTriangle className="h-4 w-4" />
+        <AlertTitle>Items are deleted permanently after {RETENTION_DAYS} days</AlertTitle>
+        <AlertDescription>
+          Anything moved here is kept for {RETENTION_DAYS} days from the day you
+          delete it, then removed for good and cannot be recovered. The countdown
+          is per item, so restore anything you want to keep before its {RETENTION_DAYS}
+          {' '}days are up.
+        </AlertDescription>
+      </Alert>
 
       <Tabs defaultValue="products">
         <TabsList>
