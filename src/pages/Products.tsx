@@ -68,6 +68,7 @@ const Products = () => {
     discount_price: '',
     tax_rate: '0',
     stock: '',
+    low_stock_threshold: '5',
     weight: '',
     unit: 'g',
     origin_country: '',
@@ -186,6 +187,9 @@ const Products = () => {
     form.append('price', String(parseNumberOrZero(def?.price ?? '0')));
     if (def?.discount_price) form.append('discount_price', String(parseNumberOrZero(def.discount_price)));
     form.append('stock', String(parseInt(def?.stock ?? '0') || 0));
+    // Per-product low-stock alert level (emails the admin when stock falls to
+    // or below this). Product-level threshold; sizes can have their own too.
+    form.append('low_stock_threshold', String(parseInt(formData.low_stock_threshold ?? '5') || 0));
     // Per-product GST rate (%). Frontend default is 0; set per product
     // (e.g. 5 for taxable goods, 0 for papad / papad katran).
     form.append('tax_rate', String(parseNumberOrZero(formData.tax_rate || '0')));
@@ -359,6 +363,7 @@ const Products = () => {
         discount_price: fullProduct.discount_price !== undefined && fullProduct.discount_price !== null ? String(fullProduct.discount_price) : '',
         tax_rate: fullProduct.tax_rate !== undefined && fullProduct.tax_rate !== null ? String(fullProduct.tax_rate) : '0',
         stock: String(fullProduct.stock ?? 0),
+        low_stock_threshold: fullProduct.low_stock_threshold != null ? String(fullProduct.low_stock_threshold) : '5',
         weight: fullProduct.weight !== undefined && fullProduct.weight !== null ? String(fullProduct.weight) : '',
         unit: fullProduct.unit || 'g',
         origin_country: fullProduct.origin_country || 'India',
@@ -430,6 +435,7 @@ const Products = () => {
       discount_price: '',
       tax_rate: '0',
       stock: '',
+      low_stock_threshold: '5',
       weight: '',
       unit: 'g',
       origin_country: '',
@@ -482,6 +488,7 @@ const Products = () => {
         discount_price: fullProduct.discount_price != null ? String(fullProduct.discount_price) : '',
         tax_rate: fullProduct.tax_rate != null ? String(fullProduct.tax_rate) : '0',
         stock: '0',
+        low_stock_threshold: fullProduct.low_stock_threshold != null ? String(fullProduct.low_stock_threshold) : '5',
         weight: fullProduct.weight != null ? String(fullProduct.weight) : '',
         unit: fullProduct.unit || 'g',
         origin_country: fullProduct.origin_country || 'India',
@@ -946,13 +953,13 @@ const Products = () => {
                         onChange={e => updateVariantRow(row.key, { discount_price: e.target.value })}
                         placeholder="—" />
                     </div>
-                    <div className="col-span-3 sm:col-span-1">
+                    <div className="col-span-3 sm:col-span-2">
                       <Label className="text-xs">Stock</Label>
                       <Input type="number" min="0" value={row.stock}
                         onChange={e => updateVariantRow(row.key, { stock: e.target.value })}
                         placeholder="0" />
                     </div>
-                    <div className="col-span-6 sm:col-span-2 flex items-center gap-3 pb-2">
+                    <div className="col-span-6 sm:col-span-2 flex items-center gap-3 pb-2 flex-wrap">
                       <label className="flex items-center gap-1 text-xs cursor-pointer" title="Default size">
                         <input type="radio" name="default-variant" checked={row.is_default}
                           onChange={() => setDefaultRow(row.key)} />
@@ -963,9 +970,7 @@ const Products = () => {
                           onChange={e => updateVariantRow(row.key, { is_active: e.target.checked })} />
                         Active
                       </label>
-                    </div>
-                    <div className="col-span-3 sm:col-span-1 flex justify-end pb-1">
-                      <Button type="button" variant="ghost" size="icon"
+                      <Button type="button" variant="ghost" size="icon" className="ml-auto"
                         onClick={() => removeVariantRow(row.key)}
                         disabled={variantRows.length <= 1}
                         title="Remove size">
@@ -986,6 +991,23 @@ const Products = () => {
                   onChange={e => setFormData({ ...formData, origin_country: e.target.value })}
                   placeholder="India"
                 />
+              </div>
+
+              <div>
+                <Label htmlFor="low_stock_threshold">Low-stock alert level</Label>
+                <Input
+                  id="low_stock_threshold"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={formData.low_stock_threshold}
+                  onChange={e => setFormData({ ...formData, low_stock_threshold: e.target.value })}
+                  placeholder="5"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Email the admin when this product's stock falls to or below this
+                  number. Default 5.
+                </p>
               </div>
 
               <div>
