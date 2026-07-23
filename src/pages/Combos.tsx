@@ -32,6 +32,7 @@ const Combos = () => {
     discount_price: '',
     weight: '',
     unit: 'g',
+    low_stock_threshold: '5',
     is_active: true,
     is_featured: false,
   });
@@ -114,6 +115,7 @@ const Combos = () => {
     }
     form.append('weight', String(parseNumberOrZero(formData.weight)));
     form.append('unit', formData.unit);
+    form.append('low_stock_threshold', String(parseNumberOrZero(formData.low_stock_threshold)));
     form.append('is_active', String(formData.is_active));
     form.append('is_featured', String(formData.is_featured));
     
@@ -275,6 +277,7 @@ const handleToggleStatus = async (combo: Combo) => {
         discount_price: fullCombo.discount_price !== undefined && fullCombo.discount_price !== null ? String(fullCombo.discount_price) : '',
         weight: fullCombo.weight !== undefined && fullCombo.weight !== null ? String(fullCombo.weight) : '',
         unit: fullCombo.unit || 'g',
+        low_stock_threshold: fullCombo.low_stock_threshold !== undefined && fullCombo.low_stock_threshold !== null ? String(fullCombo.low_stock_threshold) : '5',
         is_active: fullCombo.is_active,
         is_featured: fullCombo.is_featured || false,
       });
@@ -304,6 +307,7 @@ const handleToggleStatus = async (combo: Combo) => {
       discount_price: '',
       weight: '',
       unit: 'g',
+      low_stock_threshold: '5',
       is_active: true,
       is_featured: false,
     });
@@ -575,7 +579,27 @@ const handleToggleStatus = async (combo: Combo) => {
                 </Select>
               </div>
             </div>
-            
+
+            <div>
+              <Label htmlFor="low_stock_threshold">Low-stock alert level</Label>
+              <Input
+                id="low_stock_threshold"
+                type="number"
+                min="0"
+                step="1"
+                value={formData.low_stock_threshold}
+                onChange={e => setFormData({ ...formData, low_stock_threshold: e.target.value })}
+                placeholder="e.g. 5"
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Email the admin when the number of combos that can still be built
+                (limited by the scarcest product in it) drops to this or below.
+                {editingCombo?.available_stock !== undefined && (
+                  <> Currently {editingCombo.available_stock} can be built.</>
+                )}
+              </p>
+            </div>
+
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <Label>Products in Combo *</Label>

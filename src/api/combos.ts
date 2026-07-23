@@ -29,6 +29,10 @@ export interface Combo {
   is_featured?: boolean;
   is_active: boolean;
   badge?: string;
+  /** Alert the admin when the buildable count falls to/below this. */
+  low_stock_threshold?: number;
+  /** Read-only: how many combos can still be built (scarcest component). */
+  available_stock?: number;
   created_at?: string;
   items?: ComboItem[];
   products?: number[];  // Product IDs in combo
