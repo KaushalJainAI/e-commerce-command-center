@@ -175,11 +175,15 @@ const Orders = () => {
     delivering: 'Out for delivery',
     delivered: 'Mark as delivered',
   };
+  // Keep these truthful about notifications: the backend deliberately does NOT
+  // email the customer on a routine status change (orders/views.py `update`).
+  // The only status-related mails are the tracking number ("your order shipped")
+  // and cancellation — so never promise an email here.
   const NEXT_STEP_SENTENCE: Partial<Record<OrderStatus, string>> = {
-    confirmed: 'confirm this order? The customer will get an email that you are preparing it.',
+    confirmed: 'confirm this order?',
     processing: 'start packing this order?',
-    shipped: 'mark this order as shipped? The customer will be emailed.',
-    delivering: 'mark this order as out for delivery?',
+    shipped: 'mark this order as shipped? The customer is emailed when you add a tracking number, not now.',
+    delivering: 'mark this order as out for delivery? You cannot cancel it after this step.',
     delivered: 'mark this order as delivered? This completes the order.',
   };
 
