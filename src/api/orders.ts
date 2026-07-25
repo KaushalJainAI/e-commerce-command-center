@@ -45,6 +45,8 @@ export interface Order {
   items: OrderItem[];
   subtotal: number;
   tax: number;
+  /** Delivery fee charged on this order; 0 when free shipping applied. */
+  shipping_charge?: number;
   discount: number;
   total: number;
   shipping_address: string;

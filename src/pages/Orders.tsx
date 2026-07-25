@@ -1030,6 +1030,14 @@ const Orders = () => {
                   <span className="text-muted-foreground">Tax</span>
                   <span>₹{parseFloat(String(viewingOrder.tax || 0)).toFixed(2)}</span>
                 </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Delivery</span>
+                  <span>
+                    {parseFloat(String(viewingOrder.shipping_charge || 0)) === 0
+                      ? "FREE"
+                      : `₹${parseFloat(String(viewingOrder.shipping_charge)).toFixed(2)}`}
+                  </span>
+                </div>
                 <div className="flex justify-between font-bold text-lg border-t pt-2">
                   <span>Total</span>
                   <span>₹{parseFloat(String(viewingOrder.total || 0)).toFixed(2)}</span>
