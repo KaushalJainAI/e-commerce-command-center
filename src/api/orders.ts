@@ -87,8 +87,13 @@ export interface PaginatedOrders {
 
 // API functions with correct endpoint paths (trailing slashes for Django).
 // Filters map to the server-side query params handled by OrderViewSet.
+// `scope=all` explicitly asks for the ADMIN order table (every customer's
+// orders, paginated). Without it the backend serves the *customer* view — only
+// the caller's own orders as a bare array — which is what the storefront gets.
+// The scope follows the request, not the account's is_staff flag, so a shop
+// owner's own /my-orders page is never handed the all-customers table.
 export const getOrders = (filters?: OrderFilters, page = 1) => {
-  const params: Record<string, string | number> = { page };
+  const params: Record<string, string | number> = { page, scope: 'all' };
   if (filters?.status) params.status = filters.status;
   if (filters?.paymentMethod) params.payment_method = filters.paymentMethod;
   if (filters?.dateFrom) params.date_from = filters.dateFrom;
@@ -110,7 +115,7 @@ export const getDeletedOrders = async (): Promise<Order[]> => {
   // Bounded safety cap so a pathological response can't loop forever.
   for (let guard = 0; guard < 1000; guard++) {
     const response = await api.get<PaginatedOrders | Order[]>('/orders/', {
-      params: { deleted: 'true', page },
+      params: { deleted: 'true', page, scope: 'all' },
     });
     if (Array.isArray(response.data)) return response.data;
     const data = response.data as PaginatedOrders;

@@ -559,7 +559,7 @@ const Orders = () => {
                     <TableCell className="capitalize">{order.payment_method || 'N/A'}</TableCell>
                     <TableCell>
                       <div className="flex flex-col items-start gap-1">
-                        <span className={`px-2 py-1 rounded text-xs ${getStatusBadgeColor(order.status)}`}>
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize leading-5 ${getStatusBadgeColor(order.status)}`}>
                           {order.status}
                         </span>
                         {NEXT_STATUS[order.status] && (
@@ -794,13 +794,13 @@ const Orders = () => {
             <div className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <Label className="text-muted-foreground">Status</Label>
-                  <p className={`inline-block px-2 py-1 rounded text-sm ${getStatusBadgeColor(viewingOrder.status)}`}>
+                  <Label className="block mb-1 text-muted-foreground">Status</Label>
+                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize leading-5 ${getStatusBadgeColor(viewingOrder.status)}`}>
                     {viewingOrder.status}
-                  </p>
+                  </span>
                 </div>
                 <div>
-                  <Label className="text-muted-foreground">Payment Method</Label>
+                  <Label className="block mb-1 text-muted-foreground">Payment Method</Label>
                   <p className="font-medium">{viewingOrder.payment_method || 'N/A'}</p>
                 </div>
               </div>

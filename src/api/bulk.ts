@@ -69,6 +69,9 @@ export const exportCustomersCsv = () =>
 
 // Orders export respects whatever filters are currently applied.
 export const exportOrdersCsv = (params: Record<string, string | number> = {}) => {
-  const search = new URLSearchParams({ ...params, export: 'csv' } as Record<string, string>).toString();
+  // scope=all — the CSV is the admin's all-customers export, not "my orders".
+  const search = new URLSearchParams(
+    { ...params, scope: 'all', export: 'csv' } as Record<string, string>,
+  ).toString();
   return downloadBlob(`/orders/?${search}`, 'orders.csv');
 };
