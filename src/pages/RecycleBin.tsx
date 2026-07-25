@@ -1,4 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useAdminData, useInvalidate } from '@/hooks/useAdminData';
+import { TableSkeleton } from '@/components/TableSkeleton';
 import { getProducts, updateProduct, Product } from '@/api/products';
 import { getCombos, updateCombo, Combo } from '@/api/combos';
 import { getDeletedOrders, restoreOrder, Order } from '@/api/orders';
@@ -15,53 +18,49 @@ import {
 } from '@/components/ui/table';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Skeleton } from '@/components/ui/skeleton';
 import { RotateCcw, Loader2, AlertTriangle } from 'lucide-react';
 
 // Keep in sync with the backend RECYCLE_BIN_RETENTION_DAYS setting.
 const RETENTION_DAYS = 30;
 
 const RecycleBin = () => {
-  const [inactiveProducts, setInactiveProducts] = useState<Product[]>([]);
-  const [inactiveCombos, setInactiveCombos] = useState<Combo[]>([]);
-  const [deletedOrders, setDeletedOrders] = useState<Order[]>([]);
-  const [loading, setLoading] = useState(true);
   // Track the id currently being restored so we can disable just that button.
   const [restoringKey, setRestoringKey] = useState<string | null>(null);
   const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const invalidate = useInvalidate();
 
-  useEffect(() => {
-    fetchItems();
-  }, []);
+  const queryKey = ['recycle-bin'];
+  const { data, isInitialLoading, refreshing } = useAdminData(queryKey, async () => {
+    const [productsRes, combosRes, ordersRes] = await Promise.all([
+      getProducts(),
+      getCombos(),
+      getDeletedOrders(),
+    ]);
+    // Deleted products/combos are the soft-deleted (is_active = false) ones —
+    // DELETE on those endpoints deactivates rather than destroys.
+    return {
+      products: productsRes.data.filter((p) => p.is_active === false),
+      combos: combosRes.data.filter((c) => c.is_active === false),
+      orders: ordersRes,
+    };
+  });
+  const inactiveProducts = data?.products ?? [];
+  const inactiveCombos = data?.combos ?? [];
+  const deletedOrders = data?.orders ?? [];
 
-  const fetchItems = async () => {
-    setLoading(true);
-    try {
-      const [productsRes, combosRes, ordersRes] = await Promise.all([
-        getProducts(),
-        getCombos(),
-        getDeletedOrders(),
-      ]);
-      // Deleted products/combos are the soft-deleted (is_active = false) ones —
-      // DELETE on those endpoints deactivates rather than destroys.
-      setInactiveProducts(productsRes.data.filter((p) => p.is_active === false));
-      setInactiveCombos(combosRes.data.filter((c) => c.is_active === false));
-      setDeletedOrders(ordersRes);
-    } catch {
-      toast({
-        title: 'Error',
-        description: 'Failed to load the recycle bin',
-        variant: 'destructive',
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
+  /** Drop the restored row from the cached bin without a full reload. */
+  const dropFromBin = (patch: (d: NonNullable<typeof data>) => NonNullable<typeof data>) =>
+    queryClient.setQueryData(queryKey, (prev: typeof data) => (prev ? patch(prev) : prev));
 
   const handleRestoreProduct = async (product: Product) => {
     setRestoringKey(`product-${product.id}`);
     try {
       await updateProduct(product.slug, { is_active: true });
-      setInactiveProducts((prev) => prev.filter((p) => p.id !== product.id));
+      dropFromBin(d => ({ ...d, products: d.products.filter(p => p.id !== product.id) }));
+      // The product is live again — the Products page's cache is now stale.
+      invalidate(['products']);
       toast({ title: 'Restored', description: `"${product.name}" is active again.` });
     } catch {
       toast({ title: 'Error', description: 'Failed to restore product', variant: 'destructive' });
@@ -74,7 +73,8 @@ const RecycleBin = () => {
     setRestoringKey(`combo-${combo.id}`);
     try {
       await updateCombo(combo.slug, { is_active: true });
-      setInactiveCombos((prev) => prev.filter((c) => c.id !== combo.id));
+      dropFromBin(d => ({ ...d, combos: d.combos.filter(c => c.id !== combo.id) }));
+      invalidate(['combos']);
       toast({ title: 'Restored', description: `"${combo.name}" is active again.` });
     } catch {
       toast({ title: 'Error', description: 'Failed to restore combo', variant: 'destructive' });
@@ -87,7 +87,8 @@ const RecycleBin = () => {
     setRestoringKey(`order-${order.id}`);
     try {
       await restoreOrder(order.id);
-      setDeletedOrders((prev) => prev.filter((o) => o.id !== order.id));
+      dropFromBin(d => ({ ...d, orders: d.orders.filter(o => o.id !== order.id) }));
+      invalidate(['orders'], ['dashboard']);
       toast({ title: 'Restored', description: `${order.order_number} is back in Orders.` });
     } catch {
       toast({ title: 'Error', description: 'Failed to restore order', variant: 'destructive' });
@@ -115,12 +116,17 @@ const RecycleBin = () => {
     </TableRow>
   );
 
-  if (loading) {
-    return <div className="flex items-center justify-center min-h-[400px]">Loading...</div>;
+  if (isInitialLoading) {
+    return (
+      <div className="space-y-6 p-6">
+        <Skeleton className="h-9 w-48" />
+        <TableSkeleton rows={6} columns={4} />
+      </div>
+    );
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className={`space-y-6 p-6 transition-opacity ${refreshing ? 'opacity-60' : 'opacity-100'}`}>
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Recycle Bin</h1>
         <p className="text-muted-foreground">

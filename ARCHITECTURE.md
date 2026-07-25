@@ -149,6 +149,67 @@ avoid expensive aggregations on every page load.
 
 ---
 
+## Data Fetching (`hooks/useAdminData.ts`)
+
+Every list page fetches through **`useAdminData(key, fetcher)`** — a thin wrapper over
+React Query. Do not hand-roll `useState` + `useEffect` fetches in a page; they were
+removed because they refetched from scratch on every navigation and blanked the screen
+while doing it.
+
+```typescript
+const { data, isInitialLoading, refreshing, refetch } =
+  useAdminData(['products'], () => getProducts().then(r => r.data));
+```
+
+**The two loading states are not interchangeable:**
+
+| State | Meaning | What to render |
+|-------|---------|----------------|
+| `isInitialLoading` | nothing cached yet | `<TableSkeleton />` in place of the table |
+| `refreshing` | revalidating over data already on screen | dim the table (`opacity-60`) — **never unmount it** |
+
+Returning `<div>Loading...</div>` for the whole page is the anti-pattern this replaced:
+it unmounts the search box mid-keystroke, so the input loses focus and the page reads as
+a spontaneous reload.
+
+**Query defaults** (`App.tsx`): `staleTime` 30 s, `gcTime` 5 min, `refetchOnWindowFocus`
+off, one retry. A shared `QueryCache.onError` toasts load failures once, and only when
+there is no cached data to fall back on.
+
+**Cache keys are shared across pages** — `['products']` is used by Products, Sections,
+Combos and Recycle Bin, so opening one after another costs no request.
+
+⚠️ **Because data is now cached, mutations must invalidate what they affect.** Use
+`useInvalidate()` and list every key the write touches, not just the current page's:
+
+```typescript
+// Saving a product also changes section placements, bulk rows, low-stock counts
+invalidate(['products'], ['sections'], ['bulk-products'], ['dashboard']);
+```
+
+For single-field toggles, patch the cache directly with `queryClient.setQueryData` so the
+row updates instantly instead of refetching the list.
+
+**Searches** debounce through `useDebouncedValue` and put the query in the cache key, so
+responses for a query the admin has already typed past can never overwrite newer results.
+
+---
+
+## Routing & Session
+
+- **All pages below the layout are `lazy()`-loaded** (`App.tsx`), each behind a
+  `<RouteFallback />` Suspense boundary that stays invisible for 150 ms so a cached chunk
+  never flashes a skeleton. Keep new pages lazy — the main bundle is ~435 kB and the one
+  eager exception is Dashboard (the landing screen).
+- **Never navigate with `window.location`.** A 401 is handled in
+  `api/axiosInstance.ts`: it silently calls `/auth/token/refresh/` (single-flight) and
+  replays the original request. Only when that fails does it dispatch
+  `SESSION_EXPIRED_EVENT`, which `AuthContext` turns into a router navigation. A hard
+  assignment to `window.location` throws away filters, dialogs and scroll position — that
+  is what made the panel appear to reload itself once the 1-hour access token expired.
+
+---
+
 ## Page Responsibilities
 
 | Page | Manages |

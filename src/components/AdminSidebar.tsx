@@ -51,13 +51,21 @@ const menuItems = [
 ];
 
 export function AdminSidebar() {
-  const { state } = useSidebar();
+  const { state, isMobile, setOpenMobile } = useSidebar();
   const location = useLocation();
   const { logout, user } = useAuth();
   const currentPath = location.pathname;
 
-  const isActive = (path: string) => currentPath === path;
+  // Match sub-routes too: on /customers/5 the "Customers" item must still read
+  // as the current section (exact equality left the whole menu unhighlighted).
+  const isActive = (path: string) =>
+    currentPath === path || currentPath.startsWith(`${path}/`);
   const isCollapsed = state === 'collapsed';
+
+  // On phones the sidebar is a drawer over the page. Tapping a link used to
+  // navigate *behind* it, leaving the admin looking at the menu they just used
+  // and having to dismiss it by hand.
+  const closeOnMobile = () => { if (isMobile) setOpenMobile(false); };
 
   // Get display name from user profile
   const displayName = user 
@@ -94,6 +102,7 @@ export function AdminSidebar() {
                   <SidebarMenuButton asChild>
                     <NavLink
                       to={item.url}
+                      onClick={closeOnMobile}
                       className={cn(
                         'flex items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-sidebar-accent',
                         isActive(item.url) && 'bg-sidebar-accent text-sidebar-primary'

@@ -1,5 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { getAllReviews, setReviewHidden, deleteReview, Review, PaginatedReviews } from '@/api/reviews';
+import { useAdminData } from '@/hooks/useAdminData';
+import { TableSkeleton } from '@/components/TableSkeleton';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -19,40 +22,39 @@ const Stars = ({ rating }: { rating: number }) => (
 );
 
 const Reviews = () => {
-  const [reviews, setReviews] = useState<Review[]>([]);
   const [page, setPage] = useState(1);
-  const [totalCount, setTotalCount] = useState(0);
-  const [loading, setLoading] = useState(true);
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
-  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
-
-  const fetchReviews = async () => {
-    try {
+  // Keyed by page, so paging back to a page already seen is instant.
+  const queryKey = ['reviews', page];
+  const { data, isInitialLoading, refreshing, refetch: fetchReviews } = useAdminData(
+    queryKey,
+    async () => {
       const res = await getAllReviews(page);
       if (Array.isArray(res.data)) {
-        setReviews(res.data);
-        setTotalCount(res.data.length);
-      } else {
-        const data = res.data as PaginatedReviews;
-        setReviews(data.results || []);
-        setTotalCount(data.count || 0);
+        return { results: res.data, count: res.data.length };
       }
-    } catch {
-      toast({ title: 'Error', description: 'Failed to load reviews', variant: 'destructive' });
-    } finally {
-      setLoading(false);
-    }
-  };
+      const paged = res.data as PaginatedReviews;
+      return { results: paged.results || [], count: paged.count || 0 };
+    },
+  );
+  const reviews = data?.results ?? [];
+  const totalCount = data?.count ?? 0;
 
-  useEffect(() => { fetchReviews(); }, [page]); // eslint-disable-line react-hooks/exhaustive-deps
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   const toggleHidden = async (review: Review) => {
     const hiding = !review.is_hidden;
     if (hiding && !confirm(`Hide this review of "${review.item_name}" from the store? The customer keeps their review, but other shoppers won't see it.`)) return;
     try {
       await setReviewHidden(review.id, hiding);
-      setReviews(prev => prev.map(r => (r.id === review.id ? { ...r, is_hidden: hiding } : r)));
+      // Patch the cached row in place: the toggle is instant and the table
+      // never reloads for a one-field change.
+      queryClient.setQueryData(queryKey, (prev: typeof data) => prev && {
+        ...prev,
+        results: prev.results.map(r => (r.id === review.id ? { ...r, is_hidden: hiding } : r)),
+      });
       toast({
         title: hiding ? 'Hidden' : 'Visible again',
         description: hiding ? 'Shoppers will no longer see this review.' : 'This review is shown in the store again.',
@@ -73,10 +75,6 @@ const Reviews = () => {
     }
   };
 
-  if (loading) {
-    return <div className="flex items-center justify-center min-h-[400px]">Loading...</div>;
-  }
-
   return (
     <div className="space-y-6 p-6">
       <div>
@@ -88,7 +86,11 @@ const Reviews = () => {
 
       <Card>
         <CardHeader><CardTitle>All Reviews</CardTitle></CardHeader>
-        <CardContent className="overflow-x-auto">
+        <CardContent
+          className={`overflow-x-auto transition-opacity ${refreshing ? 'opacity-60' : 'opacity-100'}`}
+        >
+          {isInitialLoading ? <TableSkeleton rows={6} columns={6} /> : (
+          <>
           <Table className="min-w-[700px]">
             <TableHeader>
               <TableRow>
@@ -157,6 +159,8 @@ const Reviews = () => {
                 </Button>
               </div>
             </div>
+          )}
+          </>
           )}
         </CardContent>
       </Card>

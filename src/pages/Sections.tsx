@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useAdminData } from '@/hooks/useAdminData';
+import { TableSkeleton } from '@/components/TableSkeleton';
 import {
   getSections, createSection, updateSection, hideSection,
   getSectionProducts, setSectionProducts,
@@ -13,6 +15,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { Plus, Edit, EyeOff, Eye, ArrowUp, ArrowDown, X, ListOrdered } from 'lucide-react';
 
@@ -26,10 +29,14 @@ const SECTION_TYPES = [
 ];
 
 const Sections = () => {
-  const [sections, setSections] = useState<ProductSection[]>([]);
-  const [allProducts, setAllProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
   const { toast } = useToast();
+  // Products are shared with the Products page — same cache key, so opening
+  // this page after that one costs nothing.
+  const { data: allProducts = [] } =
+    useAdminData(['products'], () => getProducts().then(r => r.data));
+  const {
+    data: sections = [], isInitialLoading, refreshing, refetch: fetchAll,
+  } = useAdminData(['sections'], () => getSections());
 
   // Create/edit dialog
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -43,20 +50,6 @@ const Sections = () => {
   const [items, setItems] = useState<SectionProduct[]>([]);
   const [addProductId, setAddProductId] = useState('');
   const [savingOrder, setSavingOrder] = useState(false);
-
-  const fetchAll = async () => {
-    try {
-      const [secs, prods] = await Promise.all([getSections(), getProducts()]);
-      setSections(secs);
-      setAllProducts(prods.data);
-    } catch {
-      toast({ title: 'Error', description: 'Failed to load sections', variant: 'destructive' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { fetchAll(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const openCreate = () => {
     setEditing(null);
@@ -180,12 +173,17 @@ const Sections = () => {
     }
   };
 
-  if (loading) {
-    return <div className="flex items-center justify-center min-h-[400px]">Loading...</div>;
+  if (isInitialLoading) {
+    return (
+      <div className="space-y-6 p-6">
+        <Skeleton className="h-9 w-64" />
+        <TableSkeleton rows={4} columns={2} />
+      </div>
+    );
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className={`space-y-6 p-6 transition-opacity ${refreshing ? 'opacity-60' : 'opacity-100'}`}>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Homepage Sections</h1>

@@ -1,4 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useAdminData, useInvalidate } from '@/hooks/useAdminData';
+import { TableSkeleton } from '@/components/TableSkeleton';
 import { useSearchParams } from 'react-router-dom';
 import {
   getProducts, getProduct, createProduct, updateProduct, updateProductSections, Product, ProductImage,
@@ -42,12 +45,19 @@ const blankVariantRow = (is_default = false): VariantRow => ({
 });
 
 const Products = () => {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [sections, setSections] = useState<ProductSection[]>([]);
+  const queryClient = useQueryClient();
+  const invalidate = useInvalidate();
+  // Four independent caches: the catalog is shared with Sections/RecycleBin,
+  // while categories/sections/spice-forms are near-static reference data that
+  // no longer refetch every time this page is opened.
+  const {
+    data: products = [], isInitialLoading, refreshing, refetch: fetchProducts,
+  } = useAdminData(['products'], () => getProducts().then(r => r.data || []));
+  const { data: categories = [] } =
+    useAdminData(['categories'], () => getCategories().then(r => r.data || []));
+  const { data: sections = [] } = useAdminData(['sections'], () => getSections());
+  const { data: spiceForms = [] } = useAdminData(['spice-forms'], () => getSpiceForms());
   const [selectedSections, setSelectedSections] = useState<number[]>([]);
-  const [spiceForms, setSpiceForms] = useState<{ value: string; label: string }[]>([]);
-  const [loading, setLoading] = useState(true);
   // The dashboard's "Restock products" button deep-links to /products?stock=low.
   const [searchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState(() => searchParams.get('search') || '');
@@ -93,44 +103,10 @@ const Products = () => {
 
   const { toast } = useToast();
 
-  useEffect(() => {
-    const init = async () => {
-      try {
-        const [productsRes, categoriesRes, spiceFormsRes, sectionsRes] = await Promise.all([
-          getProducts(),
-          getCategories(),
-          getSpiceForms(),
-          getSections(),
-        ]);
-        setProducts(productsRes.data || []);
-        setCategories(categoriesRes.data || []);
-        setSpiceForms(spiceFormsRes || []);
-        setSections(sectionsRes || []);
-      } catch {
-        toast({
-          title: 'Error',
-          description: 'Failed to load products or categories',
-          variant: 'destructive',
-        });
-      } finally {
-        setLoading(false);
-      }
-    };
-    init();
-  }, [toast]);
-
-  const fetchProducts = async () => {
-    try {
-      const response = await getProducts();
-      setProducts(response.data || []);
-    } catch {
-      toast({
-        title: 'Error',
-        description: 'Failed to load products',
-        variant: 'destructive',
-      });
-    }
-  };
+  /** Patch one product's active flag in the cached list (optimistic + revert). */
+  const setProductActive = (id: number, isActive: boolean) =>
+    queryClient.setQueryData(['products'], (prev: Product[] | undefined) =>
+      prev?.map(p => (p.id === id ? { ...p, is_active: isActive } : p)));
 
   const parseNumberOrZero = (value: string) => {
     const n = parseFloat(value);
@@ -292,7 +268,9 @@ const Products = () => {
       toast({ title: 'Success', description: editingProduct ? 'Product updated successfully' : 'Product created successfully' });
       setDialogOpen(false);
       resetForm();
-      fetchProducts();
+      // Saving a product can change its sections and its stock, so the pages
+      // built on those (Sections, Bulk edit, dashboard low-stock) go stale too.
+      invalidate(['products'], ['sections'], ['bulk-products'], ['dashboard']);
     } catch (error: any) {
       console.error('Submit error:', error);
       toast({
@@ -309,12 +287,9 @@ const Products = () => {
     const newStatus = !product.is_active;
     
     // Optimistic update - update UI immediately
-    setProducts(prevProducts => 
-      prevProducts.map(p => 
-        p.id === product.id ? { ...p, is_active: newStatus } : p
-      )
-    );
-    
+    setProductActive(product.id, newStatus);
+
+
     try {
       // Create FormData for the update
       const formData = new FormData();
@@ -335,12 +310,9 @@ const Products = () => {
       console.error('Toggle error:', error);
       
       // Revert optimistic update on error
-      setProducts(prevProducts => 
-        prevProducts.map(p => 
-          p.id === product.id ? { ...p, is_active: !newStatus } : p
-        )
-      );
-      
+      setProductActive(product.id, !newStatus);
+
+
       toast({
         title: 'Error',
         description: error.message || 'Failed to update product status',
@@ -610,10 +582,6 @@ const Products = () => {
     return sorted;
   }, [products, searchQuery, filterCategory, filterStock, sortBy]);
 
-  if (loading) {
-    return <div className="flex items-center justify-center min-h-[400px]">Loading...</div>;
-  }
-
   return (
     <div className="space-y-6 p-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -681,7 +649,11 @@ const Products = () => {
             </Select>
           </div>
         </CardHeader>
-        <CardContent className="overflow-x-auto">
+        <CardContent
+          className={`overflow-x-auto transition-opacity ${refreshing ? 'opacity-60' : 'opacity-100'}`}
+        >
+          {isInitialLoading ? <TableSkeleton rows={8} columns={6} /> : (
+          <>
           <Table className="min-w-[600px]">
             <TableHeader>
               <TableRow>
@@ -800,6 +772,8 @@ const Products = () => {
             <div className="text-center py-12">
               <p className="text-muted-foreground">No products found.</p>
             </div>
+          )}
+          </>
           )}
         </CardContent>
       </Card>

@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAdminData } from '@/hooks/useAdminData';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   getDashboardStats, DashboardStats,
   getDashboardActions, DashboardActions,
@@ -24,45 +25,37 @@ interface ActionItem {
   urgent?: boolean;
 }
 
+/** Mirrors the real dashboard's shape so the layout doesn't jump when data lands. */
+const DashboardSkeleton = () => (
+  <div className="space-y-6" aria-busy="true">
+    <Skeleton className="h-9 w-64" />
+    <div className="grid gap-4 grid-cols-2">
+      <Skeleton className="h-28" />
+      <Skeleton className="h-28" />
+    </div>
+    <Skeleton className="h-6 w-48" />
+    <div className="space-y-3">
+      <Skeleton className="h-20" />
+      <Skeleton className="h-20" />
+    </div>
+    <Skeleton className="h-48" />
+  </div>
+);
+
 const Dashboard = () => {
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [actions, setActions] = useState<DashboardActions | null>(null);
-  const [loading, setLoading] = useState(true);
-  const { toast } = useToast();
   const navigate = useNavigate();
 
-  useEffect(() => {
-    const fetchAll = async () => {
-      try {
-        const [statsRes, actionsRes] = await Promise.all([
-          getDashboardStats(),
-          getDashboardActions(),
-        ]);
-        setStats(statsRes.data);
-        setActions(actionsRes.data);
-      } catch {
-        toast({
-          title: 'Error',
-          description: 'Failed to load dashboard',
-          variant: 'destructive',
-        });
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchAll();
-    // Keep the inbox fresh while the page is open.
-    const timer = setInterval(async () => {
-      try {
-        const res = await getDashboardActions();
-        setActions(res.data);
-      } catch { /* silent — next tick will retry */ }
-    }, 60_000);
-    return () => clearInterval(timer);
-  }, [toast]);
+  const { data: stats, isInitialLoading: statsLoading } =
+    useAdminData(['dashboard', 'stats'], () => getDashboardStats().then(r => r.data));
+  // The action inbox polls itself so a new order shows up without a reload.
+  const { data: actions, isInitialLoading: actionsLoading } = useAdminData(
+    ['dashboard', 'actions'],
+    () => getDashboardActions().then(r => r.data),
+    { refetchInterval: 60_000 },
+  );
 
-  if (loading) {
-    return <div className="flex items-center justify-center min-h-[400px]">Loading...</div>;
+  if (statsLoading || actionsLoading) {
+    return <DashboardSkeleton />;
   }
 
   const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;

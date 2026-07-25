@@ -11,7 +11,9 @@ export const GlobalSearch = () => {
   const [results, setResults] = useState<GlobalSearchResults | null>(null);
   const [open, setOpen] = useState(false);
   const [searching, setSearching] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
   // Debounced fetch: wait for the admin to stop typing.
@@ -27,6 +29,7 @@ export const GlobalSearch = () => {
       try {
         const res = await globalSearch(q);
         setResults(res.data);
+        setActiveIndex(0);
         setOpen(true);
       } catch {
         setResults(null);
@@ -48,10 +51,52 @@ export const GlobalSearch = () => {
     return () => document.removeEventListener('mousedown', onClick);
   }, []);
 
+  // Ctrl/⌘+K focuses the box from anywhere in the panel.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
   const go = (path: string) => {
     setOpen(false);
     setQuery('');
     navigate(path);
+  };
+
+  // Flat, in-render-order list of every result so the arrow keys and Enter can
+  // walk it. Without this the dropdown was mouse-only: pressing Enter in the
+  // box did nothing at all.
+  const flatResults: { key: string; path: string }[] = results
+    ? [
+        ...results.orders.map(o => ({ key: `o-${o.id}`, path: `/orders?search=${o.id}` })),
+        ...results.products.map(p => ({
+          key: `p-${p.id}`, path: `/products?search=${encodeURIComponent(p.name)}`,
+        })),
+        ...results.customers.map(c => ({ key: `c-${c.id}`, path: `/customers/${c.id}` })),
+        ...results.coupons.map(c => ({ key: `cp-${c.id}`, path: '/coupons' })),
+      ]
+    : [];
+
+  const onInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape') { setOpen(false); return; }
+    if (!open || flatResults.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveIndex(i => (i + 1) % flatResults.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveIndex(i => (i - 1 + flatResults.length) % flatResults.length);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      go(flatResults[Math.min(activeIndex, flatResults.length - 1)].path);
+    }
   };
 
   const isEmpty =
@@ -66,13 +111,19 @@ export const GlobalSearch = () => {
     </div>
   );
 
-  const Row = ({ icon: Icon, main, sub, onClick }: {
-    icon: typeof Search; main: string; sub?: string; onClick: () => void;
+  const Row = ({ icon: Icon, main, sub, onClick, rowKey }: {
+    icon: typeof Search; main: string; sub?: string; onClick: () => void; rowKey: string;
   }) => (
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent"
+      onMouseEnter={() => {
+        const i = flatResults.findIndex(r => r.key === rowKey);
+        if (i >= 0) setActiveIndex(i);
+      }}
+      className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent ${
+        flatResults[activeIndex]?.key === rowKey ? 'bg-accent' : ''
+      }`}
     >
       <Icon className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
       <span className="truncate font-medium">{main}</span>
@@ -87,10 +138,12 @@ export const GlobalSearch = () => {
           ? <Loader2 className="absolute left-2.5 top-2.5 h-4 w-4 animate-spin text-muted-foreground" />
           : <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />}
         <Input
-          placeholder="Search orders, products, customers…"
+          ref={inputRef}
+          placeholder="Search orders, products, customers…  (Ctrl+K)"
           className="pl-8 h-9"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={onInputKeyDown}
           onFocus={() => { if (results) setOpen(true); }}
         />
       </div>
@@ -107,6 +160,7 @@ export const GlobalSearch = () => {
               {results.orders.map(o => (
                 <Row
                   key={`o-${o.id}`}
+                  rowKey={`o-${o.id}`}
                   icon={ShoppingCart}
                   main={`${o.order_number} — ${o.customer}`}
                   sub={`₹${o.total} · ${o.status}`}
@@ -120,6 +174,7 @@ export const GlobalSearch = () => {
               {results.products.map(p => (
                 <Row
                   key={`p-${p.id}`}
+                  rowKey={`p-${p.id}`}
                   icon={Package}
                   main={p.name}
                   sub={`₹${p.price} · ${p.stock} in stock`}
@@ -133,6 +188,7 @@ export const GlobalSearch = () => {
               {results.customers.map(c => (
                 <Row
                   key={`c-${c.id}`}
+                  rowKey={`c-${c.id}`}
                   icon={User}
                   main={c.name}
                   sub={c.phone || c.email}
@@ -146,6 +202,7 @@ export const GlobalSearch = () => {
               {results.coupons.map(c => (
                 <Row
                   key={`cp-${c.id}`}
+                  rowKey={`cp-${c.id}`}
                   icon={Ticket}
                   main={c.code}
                   sub={c.is_active ? 'active' : 'inactive'}

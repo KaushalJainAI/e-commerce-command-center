@@ -1,4 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useAdminData } from '@/hooks/useAdminData';
+import { TableSkeleton } from '@/components/TableSkeleton';
 import { getCoupons, getCoupon, createCoupon, updateCoupon, deleteCoupon, validateCoupon, Coupon } from '@/api/coupons';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -24,8 +27,10 @@ import { useToast } from '@/hooks/use-toast';
 import { Plus, Edit, Trash2, ToggleLeft, ToggleRight } from 'lucide-react';
 
 const Coupons = () => {
-  const [coupons, setCoupons] = useState<Coupon[]>([]);
-  const [loading, setLoading] = useState(true);
+  const {
+    data: coupons = [], isInitialLoading, refreshing, refetch: fetchCoupons,
+  } = useAdminData(['coupons'], () => getCoupons().then(r => r.data || []));
+  const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingCoupon, setEditingCoupon] = useState<Coupon | null>(null);
   const [formData, setFormData] = useState({
@@ -38,25 +43,6 @@ const Coupons = () => {
   const [checking, setChecking] = useState(false);
 
   const { toast } = useToast();
-
-  useEffect(() => {
-    fetchCoupons();
-  }, []);
-
-  const fetchCoupons = async () => {
-    try {
-      const response = await getCoupons();
-      setCoupons(response.data || []);
-    } catch {
-      toast({
-        title: 'Error',
-        description: 'Failed to load coupons',
-        variant: 'destructive',
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -88,15 +74,16 @@ const Coupons = () => {
     }
   };
 
+  /** Patch one coupon's active flag in the cached list (optimistic + revert). */
+  const setCouponActive = (id: number, isActive: boolean) =>
+    queryClient.setQueryData(['coupons'], (prev: Coupon[] | undefined) =>
+      prev?.map(c => (c.id === id ? { ...c, is_active: isActive } : c)));
+
   const handleToggleStatus = async (coupon: Coupon) => {
     const newStatus = !coupon.is_active;
 
-    // Optimistic update
-    setCoupons(prevCoupons =>
-      prevCoupons.map(c =>
-        c.id === coupon.id ? { ...c, is_active: newStatus } : c
-      )
-    );
+    // Optimistic update, straight into the cache so the switch flips instantly.
+    setCouponActive(coupon.id, newStatus);
 
     try {
       await updateCoupon(coupon.id, { is_active: newStatus });
@@ -113,11 +100,7 @@ const Coupons = () => {
       console.error('Toggle error:', error);
 
       // Revert on error
-      setCoupons(prevCoupons =>
-        prevCoupons.map(c =>
-          c.id === coupon.id ? { ...c, is_active: !newStatus } : c
-        )
-      );
+      setCouponActive(coupon.id, !newStatus);
 
       toast({
         title: 'Error',
@@ -223,10 +206,6 @@ const Coupons = () => {
     return new Date(dateString) < new Date();
   };
 
-  if (loading) {
-    return <div className="flex items-center justify-center min-h-[400px]">Loading...</div>;
-  }
-
   return (
     <div className="space-y-6 p-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -270,7 +249,11 @@ const Coupons = () => {
         <CardHeader>
           <CardTitle>All Coupons</CardTitle>
         </CardHeader>
-        <CardContent className="overflow-x-auto">
+        <CardContent
+          className={`overflow-x-auto transition-opacity ${refreshing ? 'opacity-60' : 'opacity-100'}`}
+        >
+          {isInitialLoading ? <TableSkeleton rows={5} columns={5} /> : (
+          <>
           <Table className="min-w-[500px]">
             <TableHeader>
               <TableRow>
@@ -351,6 +334,8 @@ const Coupons = () => {
             <div className="text-center py-12">
               <p className="text-muted-foreground">No coupons found.</p>
             </div>
+          )}
+          </>
           )}
         </CardContent>
       </Card>

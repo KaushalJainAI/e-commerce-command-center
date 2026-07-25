@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useAdminData } from '@/hooks/useAdminData';
+import { TableSkeleton } from '@/components/TableSkeleton';
 import { 
   getContactSubmissions, 
   updateContactSubmission, 
@@ -42,8 +44,15 @@ import { format } from 'date-fns';
 type StatusFilter = 'all' | 'new' | 'read' | 'replied' | 'closed';
 
 const ContactSubmissions = () => {
-  const [submissions, setSubmissions] = useState<ContactSubmission[]>([]);
-  const [loading, setLoading] = useState(true);
+  const {
+    data: submissions = [], isInitialLoading, refreshing, refetch,
+  } = useAdminData(['contact-submissions'], async () => {
+    const response = await getContactSubmissions();
+    // Handle both array and paginated response
+    return Array.isArray(response.data)
+      ? response.data
+      : ((response.data as any).results || []) as ContactSubmission[];
+  });
   const [viewingSubmission, setViewingSubmission] = useState<ContactSubmission | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [replyDialogOpen, setReplyDialogOpen] = useState(false);
@@ -51,36 +60,11 @@ const ContactSubmissions = () => {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const { toast } = useToast();
 
-  useEffect(() => {
-    fetchSubmissions();
-  }, []);
-
-  const fetchSubmissions = async () => {
-    try {
-      setLoading(true);
-      const response = await getContactSubmissions();
-      // Handle both array and paginated response
-      const data = Array.isArray(response.data) 
-        ? response.data 
-        : (response.data as any).results || [];
-      setSubmissions(data);
-    } catch (error) {
-      console.error('Failed to load submissions:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to load contact submissions',
-        variant: 'destructive',
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleMarkRead = async (submission: ContactSubmission) => {
     try {
       await markContactAsRead(submission.id);
       toast({ title: 'Success', description: 'Marked as read' });
-      fetchSubmissions();
+      refetch();
     } catch (error) {
       toast({
         title: 'Error',
@@ -97,7 +81,7 @@ const ContactSubmissions = () => {
       toast({ title: 'Success', description: 'Reply saved' });
       setReplyDialogOpen(false);
       setReplyNotes('');
-      fetchSubmissions();
+      refetch();
     } catch (error) {
       toast({
         title: 'Error',
@@ -112,7 +96,7 @@ const ContactSubmissions = () => {
     try {
       await deleteContactSubmission(submission.id);
       toast({ title: 'Success', description: 'Submission deleted' });
-      fetchSubmissions();
+      refetch();
     } catch (error) {
       toast({
         title: 'Error',
@@ -154,10 +138,6 @@ const ContactSubmissions = () => {
 
   const newCount = submissions.filter(s => s.status === 'new').length;
 
-  if (loading) {
-    return <div className="flex items-center justify-center h-64">Loading...</div>;
-  }
-
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -183,8 +163,12 @@ const ContactSubmissions = () => {
               <SelectItem value="closed">Closed</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline" onClick={fetchSubmissions}>
-            <RefreshCw className="h-4 w-4 mr-2" /> Refresh
+          <Button
+            variant="outline"
+            onClick={() => refetch()}
+            disabled={refreshing}
+          >
+            <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} /> Refresh
           </Button>
         </div>
       </div>
@@ -196,7 +180,10 @@ const ContactSubmissions = () => {
             Messages ({filteredSubmissions.length})
           </CardTitle>
         </CardHeader>
-        <CardContent className="overflow-x-auto">
+        <CardContent
+          className={`overflow-x-auto transition-opacity ${refreshing ? 'opacity-60' : 'opacity-100'}`}
+        >
+          {isInitialLoading ? <TableSkeleton rows={6} columns={6} /> : (
           <Table className="min-w-[700px]">
             <TableHeader>
               <TableRow>
@@ -250,6 +237,7 @@ const ContactSubmissions = () => {
               )}
             </TableBody>
           </Table>
+          )}
         </CardContent>
       </Card>
 

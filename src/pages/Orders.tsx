@@ -23,9 +23,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { Edit, Trash2, Filter, Eye, Ban, FileDown, Upload, Receipt, MessageCircle, Printer, Download } from 'lucide-react';
+import { Edit, Trash2, Filter, Eye, Ban, FileDown, Upload, Receipt, MessageCircle, Printer, Download, Loader2, Search, X } from 'lucide-react';
 import { exportOrdersCsv } from '@/api/bulk';
 import { PageHelp } from '@/components/PageHelp';
+import { useAdminData, useInvalidate } from '@/hooks/useAdminData';
+import { useQueryClient } from '@tanstack/react-query';
+import { TableSkeleton } from '@/components/TableSkeleton';
 
 const PAGE_SIZE = 12; // must match backend REST_FRAMEWORK PAGE_SIZE
 
@@ -75,8 +78,6 @@ const PAYMENT_STATUS_COLOR: Record<string, string> = {
 };
 
 const Orders = () => {
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [viewingOrder, setViewingOrder] = useState<Order | null>(null);
@@ -99,42 +100,59 @@ const Orders = () => {
     return initial;
   });
   const [page, setPage] = useState(1);
-  const [totalCount, setTotalCount] = useState(0);
+  // What the admin has typed but not yet submitted. Kept separate from
+  // `filters` (which drives the request) so typing costs nothing: the search
+  // only runs on Enter or the Search button.
+  const [searchInput, setSearchInput] = useState(() => searchParams.get('search') || '');
+  // The filter dialog edits a draft and commits it on "Apply", so its amount
+  // and date fields don't fire a query per keystroke either.
+  const [draftFilters, setDraftFilters] = useState<OrderFilters>({});
   const { toast } = useToast();
+  const invalidate = useInvalidate();
+  const queryClient = useQueryClient();
 
+  // Re-seed from the URL whenever it changes, not just on mount: picking an
+  // order in the global search while already on /orders only swaps the query
+  // string (no remount), so without this the page would sit there unchanged.
+  useEffect(() => {
+    const status = searchParams.get('status');
+    const search = searchParams.get('search');
+    if (!status && !search) return;
+    setPage(1);
+    if (search !== null) setSearchInput(search);
+    setFilters((prev) => ({
+      ...prev,
+      status: (status as OrderStatus) || prev.status,
+      search: search ?? prev.search,
+    }));
+  }, [searchParams]);
+
+  // Filtering and sorting run in the DB (not the browser), so results are
+  // correct across the whole order history, not just the loaded page. The key
+  // carries the filters and page, so React Query caches each combination.
+  const { data, isInitialLoading, refreshing, refetch: fetchOrders } = useAdminData(
+    ['orders', filters, page],
+    async () => {
+      const response = await getOrders(filters, page);
+      const payload = response.data;
+      // Unpaginated fallback (shouldn't happen with server pagination on).
+      return Array.isArray(payload)
+        ? { results: payload, count: payload.length }
+        : { results: payload.results || [], count: payload.count || 0 };
+    },
+  );
+  const patchCachedOrderKey = ['orders', filters, page];
+  const orders = data?.results ?? [];
+  const totalCount = data?.count ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
-  // Refetch from the server whenever the filters or page change. Filtering and
-  // sorting run in the DB (not the browser), so results are correct across the
-  // whole order history, not just the currently loaded page.
-  useEffect(() => {
-    fetchOrders();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters, page]);
-
-  const fetchOrders = async () => {
-    setLoading(true);
-    try {
-      const response = await getOrders(filters, page);
-      const data = response.data;
-      if (Array.isArray(data)) {
-        // Unpaginated fallback (shouldn't happen with server pagination on).
-        setOrders(data);
-        setTotalCount(data.length);
-      } else {
-        setOrders(data.results || []);
-        setTotalCount(data.count || 0);
-      }
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: 'Failed to load orders',
-        variant: 'destructive',
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
+  /** Replace one row in the cached page — used after edits that only touch the
+   *  order the admin has open, so the table doesn't refetch behind the dialog. */
+  const patchCachedOrder = (updated: Order) =>
+    queryClient.setQueryData(patchCachedOrderKey, (prev: typeof data) => prev && {
+      ...prev,
+      results: prev.results.map((o) => (o.id === updated.id ? updated : o)),
+    });
 
   // Changing a filter must send the user back to page 1, otherwise a narrower
   // result set could leave them stranded on a now-empty page.
@@ -143,12 +161,44 @@ const Orders = () => {
     setFilters(next);
   };
 
+  /** Run the typed query. Nothing above happens until this is called. */
+  const submitSearch = () =>
+    updateFilters({ ...filters, search: searchInput.trim() || undefined });
+
+  /** Clearing is instant — the admin is asking to see everything again, and
+   *  making them press Enter to undo a search would be irritating. */
+  const clearSearch = () => {
+    setSearchInput('');
+    if (filters.search) updateFilters({ ...filters, search: undefined });
+  };
+
+  const searchDirty = (filters.search || '') !== searchInput.trim();
+
+  /** Seed the dialog's draft from what is currently applied. */
+  const openFilters = () => {
+    setDraftFilters(filters);
+    setFilterOpen(true);
+  };
+
+  /** Commit the draft. Search lives outside the dialog, so it is carried over
+   *  rather than wiped by a filter change. */
+  const applyDraftFilters = () => {
+    updateFilters({ ...draftFilters, search: filters.search });
+    setFilterOpen(false);
+  };
+
+  const clearDraftFilters = () => {
+    setDraftFilters({});
+    updateFilters({ search: filters.search });
+    setFilterOpen(false);
+  };
+
   const handleUpdateStatus = async (orderId: number, status: OrderStatus) => {
     try {
       const { data } = await updateOrder(orderId, { status });
       toast({ title: 'Success', description: 'Order status updated' });
       setViewingOrder((prev) => (prev && prev.id === orderId ? { ...prev, status: data.status } : prev));
-      fetchOrders();
+      invalidate(['orders'], ['dashboard'], ['products']);
     } catch (error) {
       toast({
         title: 'Error',
@@ -218,7 +268,7 @@ const Orders = () => {
     try {
       await cancelOrder(id);
       toast({ title: 'Success', description: 'Order cancelled' });
-      fetchOrders();
+      invalidate(['orders'], ['dashboard'], ['products']);
     } catch (error) {
       // The axios interceptor normalizes the backend message onto `error.message`.
       toast({
@@ -236,7 +286,7 @@ const Orders = () => {
     try {
       await deleteOrder(id);
       toast({ title: 'Moved to Recycle Bin', description: 'The order can be restored from the Recycle Bin.' });
-      fetchOrders();
+      invalidate(['orders'], ['dashboard'], ['products']);
     } catch (error) {
       toast({
         title: 'Error',
@@ -320,7 +370,7 @@ const Orders = () => {
         delivery_bill_uploaded_at: data.delivery_bill_uploaded_at,
       };
       setViewingOrder(updated);
-      setOrders((prev) => prev.map((o) => (o.id === updated.id ? updated : o)));
+      patchCachedOrder(updated);
       toast({ title: 'Uploaded', description: 'Delivery bill saved.' });
     } catch (error) {
       toast({
@@ -357,7 +407,7 @@ const Orders = () => {
         delivery_bill_uploaded_at: null,
       };
       setViewingOrder(updated);
-      setOrders((prev) => prev.map((o) => (o.id === updated.id ? updated : o)));
+      patchCachedOrder(updated);
       toast({ title: 'Removed', description: 'Delivery bill deleted.' });
     } catch (error) {
       toast({
@@ -380,7 +430,7 @@ const Orders = () => {
         description: value ? 'Tracking number saved — customer notified' : 'Tracking number cleared',
       });
       setViewingOrder(data);
-      fetchOrders();
+      invalidate(['orders'], ['dashboard'], ['products']);
     } catch (error) {
       toast({
         title: 'Error',
@@ -405,10 +455,6 @@ const Orders = () => {
     return colors[status] || 'bg-gray-100 text-gray-800';
   };
 
-  if (loading) {
-    return <div className="flex items-center justify-center h-64">Loading...</div>;
-  }
-
   return (
     <div className="space-y-6">
       <div>
@@ -422,13 +468,39 @@ const Orders = () => {
       </PageHelp>
       <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-4">
         <div className="flex flex-wrap items-center gap-2">
-          <Input
-            placeholder="Search order # / customer…"
-            className="w-56"
-            value={filters.search || ''}
-            onChange={(e) => updateFilters({ ...filters, search: e.target.value || undefined })}
-          />
-          <Button variant="outline" onClick={() => setFilterOpen(true)}>
+          {/* Typing does nothing on its own — Enter or the Search button runs it. */}
+          <div className="relative">
+            <Input
+              placeholder="Search order # / customer…"
+              className="w-56 pr-8"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') { e.preventDefault(); submitSearch(); }
+                if (e.key === 'Escape') clearSearch();
+              }}
+            />
+            {searchInput && (
+              <button
+                type="button"
+                onClick={clearSearch}
+                title="Clear search"
+                className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          <Button onClick={submitSearch} disabled={refreshing}>
+            {refreshing
+              ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              : <Search className="mr-2 h-4 w-4" />}
+            Search
+          </Button>
+          {searchDirty && searchInput.trim() && (
+            <span className="text-xs text-muted-foreground">Press Enter to search</span>
+          )}
+          <Button variant="outline" onClick={openFilters}>
             <Filter className="mr-2 h-4 w-4" />
             Filter & Sort
           </Button>
@@ -444,7 +516,15 @@ const Orders = () => {
           <CardTitle>All Orders ({totalCount})</CardTitle>
         </CardHeader>
         <CardContent className="overflow-x-auto">
-          <Table className="min-w-[700px]">
+          {isInitialLoading ? (
+            <TableSkeleton rows={8} columns={6} />
+          ) : (
+          <>
+          {/* Refetches dim the table instead of unmounting it, so the rows the
+              admin is reading stay put and the search box keeps focus. */}
+          <Table
+            className={`min-w-[700px] transition-opacity ${refreshing ? 'opacity-60' : 'opacity-100'}`}
+          >
             <TableHeader>
               <TableRow>
                 <TableHead>Order #</TableHead>
@@ -542,7 +622,7 @@ const Orders = () => {
                 variant="outline"
                 size="sm"
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={loading || page <= 1}
+                disabled={refreshing || page <= 1}
               >
                 Previous
               </Button>
@@ -550,12 +630,14 @@ const Orders = () => {
                 variant="outline"
                 size="sm"
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={loading || page >= totalPages}
+                disabled={refreshing || page >= totalPages}
               >
                 Next
               </Button>
             </div>
           </div>
+          </>
+          )}
         </CardContent>
       </Card>
 
@@ -569,8 +651,8 @@ const Orders = () => {
             <div className="space-y-1.5">
               <Label>Status</Label>
               <Select
-                value={filters.status || 'all'}
-                onValueChange={(value) => updateFilters({ ...filters, status: (value === 'all' ? undefined : value as OrderStatus) })}
+                value={draftFilters.status || 'all'}
+                onValueChange={(value) => setDraftFilters({ ...draftFilters, status: (value === 'all' ? undefined : value as OrderStatus) })}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="All statuses" />
@@ -590,8 +672,8 @@ const Orders = () => {
             <div className="space-y-1.5">
               <Label>Payment Method</Label>
               <Select
-                value={filters.paymentMethod || 'all'}
-                onValueChange={(value) => updateFilters({ ...filters, paymentMethod: (value === 'all' ? undefined : value as PaymentMethod) })}
+                value={draftFilters.paymentMethod || 'all'}
+                onValueChange={(value) => setDraftFilters({ ...draftFilters, paymentMethod: (value === 'all' ? undefined : value as PaymentMethod) })}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="All methods" />
@@ -605,7 +687,7 @@ const Orders = () => {
             </div>
             <div className="space-y-1.5">
               <Label>Sort By</Label>
-              <Select value={filters.sortBy || 'default'} onValueChange={(value) => updateFilters({ ...filters, sortBy: (value === 'default' ? undefined : value as any) })}>
+              <Select value={draftFilters.sortBy || 'default'} onValueChange={(value) => setDraftFilters({ ...draftFilters, sortBy: (value === 'default' ? undefined : value as any) })}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select sorting" />
                 </SelectTrigger>
@@ -628,14 +710,14 @@ const Orders = () => {
                 ] as const).map(({ label, days }) => {
                   const to = IST_TODAY();
                   const from = istDateDaysAgo(days);
-                  const active = filters.dateFrom === from && filters.dateTo === to;
+                  const active = draftFilters.dateFrom === from && draftFilters.dateTo === to;
                   return (
                     <Button
                       key={label}
                       type="button"
                       size="sm"
                       variant={active ? 'default' : 'outline'}
-                      onClick={() => updateFilters({ ...filters, dateFrom: from, dateTo: to })}
+                      onClick={() => setDraftFilters({ ...draftFilters, dateFrom: from, dateTo: to })}
                     >
                       {label}
                     </Button>
@@ -647,16 +729,16 @@ const Orders = () => {
                   <Label className="text-xs text-muted-foreground">From</Label>
                   <Input
                     type="date"
-                    value={filters.dateFrom || ''}
-                    onChange={(e) => updateFilters({ ...filters, dateFrom: e.target.value || undefined })}
+                    value={draftFilters.dateFrom || ''}
+                    onChange={(e) => setDraftFilters({ ...draftFilters, dateFrom: e.target.value || undefined })}
                   />
                 </div>
                 <div>
                   <Label className="text-xs text-muted-foreground">To</Label>
                   <Input
                     type="date"
-                    value={filters.dateTo || ''}
-                    onChange={(e) => updateFilters({ ...filters, dateTo: e.target.value || undefined })}
+                    value={draftFilters.dateTo || ''}
+                    onChange={(e) => setDraftFilters({ ...draftFilters, dateTo: e.target.value || undefined })}
                   />
                 </div>
               </div>
@@ -667,8 +749,8 @@ const Orders = () => {
                 <Input
                   type="number"
                   placeholder="₹0"
-                  value={filters.minAmount || ''}
-                  onChange={(e) => updateFilters({ ...filters, minAmount: parseFloat(e.target.value) || undefined })}
+                  value={draftFilters.minAmount || ''}
+                  onChange={(e) => setDraftFilters({ ...draftFilters, minAmount: parseFloat(e.target.value) || undefined })}
                 />
               </div>
               <div className="space-y-1.5">
@@ -676,17 +758,17 @@ const Orders = () => {
                 <Input
                   type="number"
                   placeholder="No limit"
-                  value={filters.maxAmount || ''}
-                  onChange={(e) => updateFilters({ ...filters, maxAmount: parseFloat(e.target.value) || undefined })}
+                  value={draftFilters.maxAmount || ''}
+                  onChange={(e) => setDraftFilters({ ...draftFilters, maxAmount: parseFloat(e.target.value) || undefined })}
                 />
               </div>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => { updateFilters({}); setFilterOpen(false); }}>
+            <Button variant="outline" onClick={clearDraftFilters}>
               Clear Filters
             </Button>
-            <Button onClick={() => setFilterOpen(false)}>Apply</Button>
+            <Button onClick={applyDraftFilters}>Apply</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

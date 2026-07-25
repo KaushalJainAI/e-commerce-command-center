@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { login as apiLogin, getAdminInfo, AdminInfo } from '@/api/admin';
+import api, { SESSION_EXPIRED_EVENT } from '@/api/axiosInstance';
 
 interface AuthContextType {
   isAuthenticated: boolean;
@@ -53,6 +54,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     initAuth();
   }, []);
 
+  // The axios interceptor fires this once a silent token refresh has failed.
+  // Handling it here keeps the exit client-side (router navigation) instead of
+  // a full page reload from window.location.
+  useEffect(() => {
+    const onExpired = () => {
+      setIsAuthenticated(false);
+      setUser(null);
+      navigate('/login', { replace: true, state: { from: window.location.pathname } });
+    };
+    window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
+  }, [navigate]);
+
   const login = async (email: string, password: string) => {
     try {
       const response = await apiLogin({ email, password });
@@ -65,13 +79,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const logout = async () => {
+    // Just clear the cookies server-side. (This used to also fire a login call
+    // with empty credentials, which burned a slot in the 5/min login throttle
+    // on every logout.)
     try {
-      await apiLogin({ email: '', password: '' }); // Hack, just to import axios if needed, wait no... we can just use fetch or api.post
-    } catch(e) {}
-    try {
-      const api = (await import('@/api/axiosInstance')).default;
       await api.post('/auth/logout/');
-    } catch(e) {}
+    } catch (e) { /* logging out locally regardless */ }
     setIsAuthenticated(false);
     setUser(null);
     navigate('/login');

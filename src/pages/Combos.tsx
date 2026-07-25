@@ -1,4 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useAdminData, useInvalidate } from '@/hooks/useAdminData';
+import { TableSkeleton } from '@/components/TableSkeleton';
 import { getCombos, getCombo, createCombo, updateCombo, updateComboSections, Combo, ComboItem } from '@/api/combos';
 import { getProducts, Product } from '@/api/products';
 import { getSections, ProductSection } from '@/api/sections';
@@ -15,12 +18,19 @@ import { Plus, Edit, ToggleLeft, ToggleRight, X } from 'lucide-react';
 
 
 const Combos = () => {
-  const [combos, setCombos] = useState<Combo[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [allProducts, setAllProducts] = useState<Product[]>([]);
-  const [sections, setSections] = useState<ProductSection[]>([]);
+  const queryClient = useQueryClient();
+  const invalidate = useInvalidate();
+  const {
+    data: combos = [], isInitialLoading, refreshing, refetch: fetchCombos,
+  } = useAdminData(['combos'], () => getCombos().then(r => r.data || []));
+  // Shared cache with Products/Sections — opening this page after those is free.
+  const { data: allProducts = [], refetch: fetchAllProducts } =
+    useAdminData(['products'], () => getProducts().then(r => r.data));
+  const { data: sections = [] } = useAdminData(['sections'], () => getSections());
+  // Only active products can go into a new combo, but an existing combo may
+  // still reference one that was since deactivated — hence both lists.
+  const products = allProducts.filter(p => p.is_active);
   const [selectedSections, setSelectedSections] = useState<number[]>([]);
-  const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingCombo, setEditingCombo] = useState<Combo | null>(null);
   const [formData, setFormData] = useState({
@@ -42,56 +52,10 @@ const Combos = () => {
 
   const { toast } = useToast();
 
-  useEffect(() => {
-    const init = async () => {
-      try {
-        const [combosRes, productsRes, sectionsRes] = await Promise.all([
-          getCombos(), getProducts(), getSections(),
-        ]);
-        setCombos(combosRes.data || []);
-        const activeProducts = productsRes.data.filter((p) => p.is_active);
-        setProducts(activeProducts);
-        setAllProducts(productsRes.data);
-        setSections(sectionsRes || []);
-      } catch {
-        toast({
-          title: 'Error',
-          description: 'Failed to load combos or products',
-          variant: 'destructive',
-        });
-      } finally {
-        setLoading(false);
-      }
-    };
-    init();
-  }, [toast]);
-
-  const fetchCombos = async () => {
-    try {
-      const response = await getCombos();
-      setCombos(response.data || []);
-    } catch {
-      toast({
-        title: 'Error',
-        description: 'Failed to load combos',
-        variant: 'destructive',
-      });
-    }
-  };
-
-  const fetchAllProducts = async () => {
-    try {
-      const response = await getProducts();
-      setAllProducts(response.data);
-      setProducts(response.data.filter((p) => p.is_active));
-    } catch {
-      toast({
-        title: 'Error',
-        description: 'Failed to load products',
-        variant: 'destructive',
-      });
-    }
-  };
+  /** Patch one combo's active flag in the cached list (optimistic + revert). */
+  const setComboActive = (id: number, isActive: boolean) =>
+    queryClient.setQueryData(['combos'], (prev: Combo[] | undefined) =>
+      prev?.map(c => (c.id === id ? { ...c, is_active: isActive } : c)));
 
   const parseNumberOrZero = (value: string) => {
     const n = parseFloat(value);
@@ -172,7 +136,8 @@ const Combos = () => {
 
       setDialogOpen(false);
       resetForm();
-      fetchCombos();
+      // A combo's section placements just changed too.
+      invalidate(['combos'], ['sections']);
     } catch (error: any) {
       console.error('Submit error:', error);
       toast({
@@ -188,12 +153,8 @@ const handleToggleStatus = async (combo: Combo) => {
   const newStatus = !combo.is_active;
   
   // Optimistic update
-  setCombos(prevCombos => 
-    prevCombos.map(c => 
-      c.id === combo.id ? { ...c, is_active: newStatus } : c
-    )
-  );
-  
+  setComboActive(combo.id, newStatus);
+
   try {
     // Send as JSON instead of FormData for simple updates
     await updateCombo(combo.slug, { is_active: newStatus });
@@ -210,12 +171,8 @@ const handleToggleStatus = async (combo: Combo) => {
   } catch (error) {
     console.error('Toggle status error:', error);
     // Revert on error
-    setCombos(prevCombos => 
-      prevCombos.map(c => 
-        c.id === combo.id ? { ...c, is_active: !newStatus } : c
-      )
-    );
-    
+    setComboActive(combo.id, !newStatus);
+
     toast({
       title: 'Error',
       description: 'Failed to update combo status',
@@ -335,10 +292,6 @@ const handleToggleStatus = async (combo: Combo) => {
     return allProducts.find(p => String(p.id) === String(productId));
   };
 
-  if (loading) {
-    return <div className="flex items-center justify-center min-h-[400px]">Loading...</div>;
-  }
-
   return (
     <div className="space-y-6 p-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -355,7 +308,11 @@ const handleToggleStatus = async (combo: Combo) => {
         <CardHeader>
           <CardTitle>All Combos</CardTitle>
         </CardHeader>
-        <CardContent className="overflow-x-auto">
+        <CardContent
+          className={`overflow-x-auto transition-opacity ${refreshing ? 'opacity-60' : 'opacity-100'}`}
+        >
+          {isInitialLoading ? <TableSkeleton rows={6} columns={6} /> : (
+          <>
           <Table className="min-w-[600px]">
             <TableHeader>
               <TableRow>
@@ -440,6 +397,8 @@ const handleToggleStatus = async (combo: Combo) => {
             <div className="text-center py-12">
               <p className="text-muted-foreground">No combos found.</p>
             </div>
+          )}
+          </>
           )}
         </CardContent>
       </Card>

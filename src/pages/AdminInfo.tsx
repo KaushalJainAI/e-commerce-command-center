@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { Save, User, Loader2, CreditCard } from 'lucide-react';
+import { Skeleton } from '@/components/ui/skeleton';
 
 const AdminInfo = () => {
   const [loading, setLoading] = useState(true);
@@ -150,9 +151,13 @@ const AdminInfo = () => {
   };
 
   if (loading) {
+    // Shaped like the two cards below rather than a centred spinner, so the
+    // heading and card outlines don't jump into place when the data lands.
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="space-y-6">
+        <Skeleton className="h-9 w-64" />
+        <Skeleton className="h-72" />
+        <Skeleton className="h-72" />
       </div>
     );
   }

@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useAdminData } from '@/hooks/useAdminData';
+import { TableSkeleton } from '@/components/TableSkeleton';
 import {
   getCategories, createCategory, updateCategory, deleteCategory, Category,
 } from '@/api/categories';
@@ -18,8 +20,9 @@ import { checkImageFile } from '@/lib/imageCheck';
 import { Plus, Edit, EyeOff, Eye } from 'lucide-react';
 
 const Categories = () => {
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(true);
+  const {
+    data: categories = [], isInitialLoading, refreshing, refetch: fetchCategories,
+  } = useAdminData(['categories'], () => getCategories().then(res => res.data));
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState<Category | null>(null);
@@ -27,14 +30,6 @@ const Categories = () => {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const { toast } = useToast();
-
-  const fetchCategories = async () => {
-    const res = await getCategories();
-    setCategories(res.data);
-    setLoading(false);
-  };
-
-  useEffect(() => { fetchCategories(); }, []);
 
   const resetForm = () => {
     setEditing(null);
@@ -119,10 +114,6 @@ const Categories = () => {
     }
   };
 
-  if (loading) {
-    return <div className="flex items-center justify-center min-h-[400px]">Loading...</div>;
-  }
-
   return (
     <div className="space-y-6 p-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -139,7 +130,10 @@ const Categories = () => {
 
       <Card>
         <CardHeader><CardTitle>All Categories</CardTitle></CardHeader>
-        <CardContent className="overflow-x-auto">
+        <CardContent
+          className={`overflow-x-auto transition-opacity ${refreshing ? 'opacity-60' : 'opacity-100'}`}
+        >
+          {isInitialLoading ? <TableSkeleton rows={5} columns={5} /> : (
           <Table className="min-w-[500px]">
             <TableHeader>
               <TableRow>
@@ -195,6 +189,7 @@ const Categories = () => {
               ))}
             </TableBody>
           </Table>
+          )}
         </CardContent>
       </Card>
 

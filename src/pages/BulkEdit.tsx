@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useAdminData, useInvalidate } from '@/hooks/useAdminData';
+import { TableSkeleton } from '@/components/TableSkeleton';
 import {
   getBulkProducts, applyBulkChanges, importProductsCsv, exportProductsCsv,
   BulkProductRow, BulkChange, ImportPreview,
@@ -19,10 +21,12 @@ import { Search, Save, Download, Upload, CheckCircle2, AlertTriangle } from 'luc
 type Edits = Record<number, { price?: string; discount_price?: string; stock?: string }>;
 
 const BulkEdit = () => {
-  const [rows, setRows] = useState<BulkProductRow[]>([]);
+  const {
+    data: rows = [], isInitialLoading, refreshing, refetch: fetchRows,
+  } = useAdminData(['bulk-products'], () => getBulkProducts().then(r => r.data));
+  const invalidate = useInvalidate();
   const [edits, setEdits] = useState<Edits>({});
   const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const { toast } = useToast();
@@ -31,19 +35,6 @@ const BulkEdit = () => {
   const [importOpen, setImportOpen] = useState(false);
   const [importing, setImporting] = useState(false);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
-
-  const fetchRows = async () => {
-    try {
-      const res = await getBulkProducts();
-      setRows(res.data);
-    } catch {
-      toast({ title: 'Error', description: 'Failed to load products', variant: 'destructive' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { fetchRows(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -103,7 +94,9 @@ const BulkEdit = () => {
       toast({ title: 'Saved', description: `${res.data.applied} product${res.data.applied === 1 ? '' : 's'} updated.` });
       setEdits({});
       setReviewOpen(false);
-      fetchRows();
+      // Prices/stock just changed — the Products page and dashboard low-stock
+      // counts are now stale, so drop their caches too.
+      invalidate(['bulk-products'], ['products'], ['dashboard']);
     } catch (error: unknown) {
       // The apply endpoint returns per-row errors on 400.
       const errs = (error as { response?: { data?: { errors?: { error: string }[] } } })?.response?.data?.errors;
@@ -144,17 +137,13 @@ const BulkEdit = () => {
       toast({ title: 'Import done', description: `${res.data.applied} product${res.data.applied === 1 ? '' : 's'} updated from your file.` });
       setImportOpen(false);
       setPreview(null);
-      fetchRows();
+      invalidate(['bulk-products'], ['products'], ['dashboard']);
     } catch {
       toast({ title: 'Error', description: 'Could not apply the imported changes.', variant: 'destructive' });
     } finally {
       setImporting(false);
     }
   };
-
-  if (loading) {
-    return <div className="flex items-center justify-center min-h-[400px]">Loading...</div>;
-  }
 
   const dirtyCount = Object.keys(edits).length;
 
@@ -191,7 +180,10 @@ const BulkEdit = () => {
             </Button>
           </div>
         </CardHeader>
-        <CardContent className="overflow-x-auto">
+        <CardContent
+          className={`overflow-x-auto transition-opacity ${refreshing ? 'opacity-60' : 'opacity-100'}`}
+        >
+          {isInitialLoading ? <TableSkeleton rows={8} columns={5} /> : (
           <Table className="min-w-[700px]">
             <TableHeader>
               <TableRow>
@@ -235,6 +227,7 @@ const BulkEdit = () => {
               ))}
             </TableBody>
           </Table>
+          )}
         </CardContent>
       </Card>
 

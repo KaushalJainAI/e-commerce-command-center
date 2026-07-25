@@ -10,9 +10,12 @@ import {
 } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
-import { Search, ArrowLeft, Phone, Mail, MapPin, MessageCircle, Download, ChevronRight } from 'lucide-react';
+import { Search, ArrowLeft, Phone, Mail, MapPin, MessageCircle, Download, ChevronRight, Loader2, X } from 'lucide-react';
 import { exportCustomersCsv } from '@/api/bulk';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useAdminData } from '@/hooks/useAdminData';
+import { TableSkeleton } from '@/components/TableSkeleton';
 
 const PAGE_SIZE = 12; // matches backend REST_FRAMEWORK PAGE_SIZE
 
@@ -33,48 +36,61 @@ const Customers = () => {
   const { toast } = useToast();
   const isMobile = useIsMobile();
 
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [detail, setDetail] = useState<CustomerDetail | null>(null);
-  const [search, setSearch] = useState('');
+  // What has been typed vs. what has actually been searched for. Typing only
+  // moves `searchInput`; nothing reaches the server until Enter or the Search
+  // button promotes it to `appliedSearch`.
+  const [searchInput, setSearchInput] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
   const [page, setPage] = useState(1);
-  const [totalCount, setTotalCount] = useState(0);
-  const [loading, setLoading] = useState(true);
 
+  // List mode. The key carries the applied query and page, so React Query
+  // caches each combination.
+  const { data, isInitialLoading, refreshing } = useAdminData(
+    ['customers', appliedSearch, page],
+    () => getCustomers(appliedSearch, page).then(res => ({
+      results: res.data.results || [],
+      count: res.data.count || 0,
+    })),
+    { enabled: !id },
+  );
+
+  const submitSearch = () => {
+    setPage(1);
+    setAppliedSearch(searchInput.trim());
+  };
+
+  /** Clearing is instant — asking to see everyone again shouldn't need Enter. */
+  const clearSearch = () => {
+    setSearchInput('');
+    if (appliedSearch) { setPage(1); setAppliedSearch(''); }
+  };
+  const customers = data?.results ?? [];
+  const totalCount = data?.count ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
-  // List mode: refetch when search (debounced) or page changes.
-  useEffect(() => {
-    if (id) return;
-    setLoading(true);
-    const timer = setTimeout(async () => {
-      try {
-        const res = await getCustomers(search, page);
-        setCustomers(res.data.results || []);
-        setTotalCount(res.data.count || 0);
-      } catch {
-        toast({ title: 'Error', description: 'Failed to load customers', variant: 'destructive' });
-      } finally {
-        setLoading(false);
-      }
-    }, search ? 300 : 0);
-    return () => clearTimeout(timer);
-  }, [id, search, page, toast]);
+  // Detail mode — a separate cache entry per customer, so going back to one
+  // already viewed renders immediately.
+  const { data: detail, error: detailError, isInitialLoading: detailLoading } =
+    useAdminData(['customer', id], () => getCustomer(id!).then(res => res.data), {
+      enabled: Boolean(id),
+    });
 
-  // Detail mode.
   useEffect(() => {
-    if (!id) { setDetail(null); return; }
-    setLoading(true);
-    getCustomer(id)
-      .then(res => setDetail(res.data))
-      .catch(() => {
-        toast({ title: 'Error', description: 'Failed to load customer', variant: 'destructive' });
-        navigate('/customers');
-      })
-      .finally(() => setLoading(false));
-  }, [id, navigate, toast]);
+    if (detailError) navigate('/customers');
+  }, [detailError, navigate]);
 
-  if (loading) {
-    return <div className="flex items-center justify-center min-h-[400px]">Loading...</div>;
+  if (id && (detailLoading || !detail)) {
+    return (
+      <div className="space-y-6 p-6">
+        <Skeleton className="h-9 w-40" />
+        <Skeleton className="h-8 w-64" />
+        <div className="grid gap-4 grid-cols-2">
+          <Skeleton className="h-28" />
+          <Skeleton className="h-28" />
+        </div>
+        <TableSkeleton rows={5} columns={4} />
+      </div>
+    );
   }
 
   // ---------- Detail view ----------
@@ -176,20 +192,50 @@ const Customers = () => {
 
       <Card>
         <CardHeader>
-          <div className="relative max-w-md">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search name, phone, or email…"
-              className="pl-8"
-              value={search}
-              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-            />
+          {/* Typing does nothing on its own — Enter or the Search button runs it. */}
+          <div className="flex max-w-xl items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search name, phone, or email…"
+                className="pl-8 pr-8"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); submitSearch(); }
+                  if (e.key === 'Escape') clearSearch();
+                }}
+              />
+              {searchInput && (
+                <button
+                  type="button"
+                  onClick={clearSearch}
+                  title="Clear search"
+                  className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+            <Button onClick={submitSearch} disabled={refreshing}>
+              {refreshing
+                ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                : <Search className="mr-2 h-4 w-4" />}
+              Search
+            </Button>
           </div>
+          {appliedSearch !== searchInput.trim() && searchInput.trim() && (
+            <p className="text-xs text-muted-foreground pt-1">Press Enter to search</p>
+          )}
         </CardHeader>
-        <CardContent className="overflow-x-auto">
-          {customers.length === 0 ? (
+        <CardContent
+          className={`overflow-x-auto transition-opacity ${refreshing && !isInitialLoading ? 'opacity-60' : 'opacity-100'}`}
+        >
+          {isInitialLoading ? (
+            <TableSkeleton rows={6} columns={5} />
+          ) : customers.length === 0 ? (
             <p className="text-center text-muted-foreground py-8">
-              {search ? 'No customers match your search.' : 'No customers yet.'}
+              {appliedSearch ? 'No customers match your search.' : 'No customers yet.'}
             </p>
           ) : isMobile ? (
             // Mobile: stacked cards instead of a wide horizontally-scrolling table.
