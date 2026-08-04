@@ -1,18 +1,41 @@
 import api from './axiosInstance';
 
+export type DiscountType = 'percent' | 'fixed';
+
 export interface Coupon {
   id: number;
   code: string;
-  discount_percent: number;
+  discount_type: DiscountType;
+  /** Set when discount_type === 'percent', null otherwise. */
+  discount_percent: number | null;
+  /** Flat ₹ off — set when discount_type === 'fixed', null otherwise.
+   *  DRF serialises DecimalField as a string. */
+  discount_amount: string | null;
+  /** Non-null = special coupon: only this customer may redeem it. */
+  assigned_user: number | null;
+  /** Read-only convenience field from the backend, so the list can name the
+   *  bound customer without a second lookup. */
+  assigned_user_email: string | null;
   is_active: boolean;
   valid_until: string | null;
+  /** Global redemption cap; null = unlimited. */
+  max_usage: number | null;
+  usage_count: number;
+  minimum_order_amount: string;
 }
 
+/** Writable shape. Both discount fields are always sent — the unused one as
+ *  null — so switching a coupon between % and ₹ never leaves a stale value. */
 export interface CouponFormData {
   code: string;
-  discount_percent: number;
+  discount_type: DiscountType;
+  discount_percent: number | null;
+  discount_amount: string | null;
+  assigned_user: number | null;
   is_active: boolean;
   valid_until: string | null;
+  max_usage: number | null;
+  minimum_order_amount: string;
 }
 
 interface PaginatedResponse<T> {
@@ -67,3 +90,9 @@ export const validateCoupon = async (code: string): Promise<CouponValidation> =>
   const response = await api.post<CouponValidation>('/coupons/validate/', { code });
   return response.data;
 };
+
+/** Human-readable discount for a coupon of either type. */
+export const formatDiscount = (coupon: Coupon): string =>
+  coupon.discount_type === 'fixed'
+    ? `₹${Number(coupon.discount_amount || 0).toLocaleString('en-IN')} OFF`
+    : `${coupon.discount_percent ?? 0}% OFF`;

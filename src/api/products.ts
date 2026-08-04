@@ -51,6 +51,13 @@ export interface Product {
   discount_price?: number;
   /** GST rate (%) for this product. Defaults to 5; papad/papad katran are 0. */
   tax_rate?: number | string;
+  /**
+   * HSN code (4/6/8 digits) this product is classified under for GST returns.
+   * '' means not classified yet — every sale of it then lands in the
+   * "NOT CLASSIFIED" row of the HSN summary. `tax_rate` says what is charged;
+   * this says why, and GSTR-1 Table 12 needs both.
+   */
+  hsn_code?: string;
   final_price?: number;
   discount_percentage?: number;
   stock: number;

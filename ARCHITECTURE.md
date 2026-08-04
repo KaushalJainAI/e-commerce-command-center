@@ -225,7 +225,7 @@ responses for a query the admin has already typed past can never overwrite newer
 | Reviews | Review moderation — hide/unhide (`is_hidden`) |
 | Customers | Customer list + per-customer detail (orders, spend) |
 | Recycle Bin | Soft-deleted orders; restore |
-| Coupons | Discount code CRUD |
+| Coupons | Discount code CRUD: % or flat ₹, minimum order, usage cap, and optional restriction to a single customer |
 | Conversations | All customer chat threads (AI + human); admin reply, status management |
 | Contact | Contact form submissions |
 | Admin Info | Admin account settings |
@@ -254,15 +254,25 @@ const buildFormData = () => {
 
 ### Combo Items as JSON
 
-Combo items are serialized as JSON within FormData:
+Combo items are serialized as JSON within FormData. `variant` — the packaging
+SIZE bundled — is the real key; `product` is sent alongside for older backends.
 ```typescript
 form.append('items', JSON.stringify(
   comboItems.map(item => ({
     product: item.productId,
+    variant: item.variantId,
     quantity: item.quantity,
   }))
 ));
 ```
+
+**No `price` is posted.** A combo's MRP is derived server-side as the sum of its
+component sizes' prices, so the form shows it read-only (`computedMrp`, which
+must sum `variant.price` — not `product.price`, a mirror of whichever size is
+default — or the displayed figure won't match what the API returns). The admin
+sets only `discount_price`, the actual selling price, validated client-side to
+be below the MRP. There is no combo GST field: tax is charged per component at
+its own product's rate.
 
 ---
 

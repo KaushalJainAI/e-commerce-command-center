@@ -3,7 +3,7 @@ import { useAdminData, useInvalidate } from '@/hooks/useAdminData';
 import { TableSkeleton } from '@/components/TableSkeleton';
 import {
   getBulkProducts, applyBulkChanges, importProductsCsv, exportProductsCsv,
-  BulkProductRow, BulkChange, ImportPreview,
+  BulkProductRow, BulkVariant, BulkChange, ImportPreview,
 } from '@/api/bulk';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -14,11 +14,35 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { Search, Save, Download, Upload, CheckCircle2, AlertTriangle } from 'lucide-react';
 
-// A single field edit keyed by product id.
-type Edits = Record<number, { price?: string; discount_price?: string; stock?: string }>;
+type Field = 'price' | 'discount_price' | 'stock';
+
+/** Plain-language names for the CSV/edit fields, shown in previews & reviews. */
+const FIELD_LABELS: Record<string, string> = {
+  price: 'price',
+  discount_price: 'discounted price',
+  stock: 'stock',
+};
+
+/** Pending edits, keyed by the thing being edited: `p:<productId>` for a
+ *  product's own price/stock, or `v:<variantId>` for one packaging size. */
+type Edits = Record<string, {
+  productId: number;
+  variantId?: number;
+  price?: string;
+  discount_price?: string;
+  stock?: string;
+}>;
+
+/** The size the grid is currently editing for a product, or `null` for the
+ *  product's own (legacy, size-less) fields. Defaults to the default size. */
+const defaultVariant = (row: BulkProductRow): BulkVariant | null =>
+  row.variants?.find(v => v.is_default) ?? row.variants?.[0] ?? null;
 
 const BulkEdit = () => {
   const {
@@ -42,49 +66,84 @@ const BulkEdit = () => {
     return rows.filter(r => r.name.toLowerCase().includes(q) || r.category_name.toLowerCase().includes(q));
   }, [rows, search]);
 
-  const setEdit = (id: number, field: 'price' | 'discount_price' | 'stock', value: string) => {
+  // Which size each product row is editing, by variant id. Unset rows fall back
+  // to the product's default size. There is deliberately no "edit the product
+  // itself" option: price and stock live on the size, and the product's own
+  // columns are a read-only mirror of the default size — writing them looks
+  // like it worked and is then overwritten by the next size save.
+  const [sizeChoice, setSizeChoice] = useState<Record<number, string>>({});
+
+  const activeVariant = (row: BulkProductRow): BulkVariant | null => {
+    const choice = sizeChoice[row.id];
+    if (choice === undefined) return defaultVariant(row);
+    return row.variants?.find(v => String(v.id) === choice) ?? defaultVariant(row);
+  };
+
+  // The row's edit key + the values the inputs compare against.
+  const target = (row: BulkProductRow) => {
+    const variant = activeVariant(row);
+    const source = variant ?? row;
+    return {
+      key: variant ? `v:${variant.id}` : `p:${row.id}`,
+      variantId: variant?.id,
+      original: (field: Field) =>
+        String(field === 'stock' ? source.stock : source[field] ?? ''),
+    };
+  };
+
+  const setEdit = (row: BulkProductRow, field: Field, value: string) => {
+    const { key, variantId, original } = target(row);
     setEdits(prev => {
-      const row = rows.find(r => r.id === id)!;
-      const original = String(field === 'stock' ? row.stock : row[field] ?? '');
-      const next = { ...prev, [id]: { ...prev[id], [field]: value } };
+      const next = {
+        ...prev,
+        [key]: { ...prev[key], productId: row.id, variantId, [field]: value },
+      };
       // Drop the edit if it matches the original again (no longer dirty).
-      if (value === original) {
-        delete next[id][field];
-        if (Object.keys(next[id]).length === 0) delete next[id];
+      if (value === original(field)) {
+        delete next[key][field];
+        const { productId: _p, variantId: _v, ...fields } = next[key];
+        if (Object.keys(fields).length === 0) delete next[key];
       }
       return next;
     });
   };
 
-  const isDirty = (id: number, field: 'price' | 'discount_price' | 'stock') =>
-    edits[id]?.[field] !== undefined;
+  const isDirty = (row: BulkProductRow, field: Field) =>
+    edits[target(row).key]?.[field] !== undefined;
 
-  const cellValue = (row: BulkProductRow, field: 'price' | 'discount_price' | 'stock') => {
-    const edited = edits[row.id]?.[field];
-    if (edited !== undefined) return edited;
-    return String(field === 'stock' ? row.stock : row[field] ?? '');
+  const cellValue = (row: BulkProductRow, field: Field) => {
+    const { key, original } = target(row);
+    return edits[key]?.[field] ?? original(field);
   };
 
   // A plain-language description of every pending change, for the review step.
   const changeList = useMemo(() => {
     const list: { name: string; description: string }[] = [];
-    for (const [idStr, fields] of Object.entries(edits)) {
-      const id = Number(idStr);
-      const row = rows.find(r => r.id === id);
+    for (const entry of Object.values(edits)) {
+      const { productId, variantId, ...fields } = entry;
+      const row = rows.find(r => r.id === productId);
       if (!row) continue;
+      const variant = variantId ? row.variants?.find(v => v.id === variantId) : null;
+      const before = variant ?? row;
       const parts: string[] = [];
-      if (fields.price !== undefined) parts.push(`price ₹${row.price || 0} → ₹${fields.price}`);
+      if (fields.price !== undefined) parts.push(`price ₹${before.price || 0} → ₹${fields.price}`);
       if (fields.discount_price !== undefined)
-        parts.push(`discount ${row.discount_price ? `₹${row.discount_price}` : 'none'} → ${fields.discount_price ? `₹${fields.discount_price}` : 'none'}`);
-      if (fields.stock !== undefined) parts.push(`stock ${row.stock} → ${fields.stock}`);
-      if (parts.length) list.push({ name: row.name, description: parts.join(', ') });
+        parts.push(`discounted price ${before.discount_price ? `₹${before.discount_price}` : 'none'} → ${fields.discount_price ? `₹${fields.discount_price}` : 'none'}`);
+      if (fields.stock !== undefined) parts.push(`stock ${before.stock} → ${fields.stock}`);
+      if (parts.length) {
+        list.push({
+          name: variant ? `${row.name} (${variant.label})` : row.name,
+          description: parts.join(', '),
+        });
+      }
     }
     return list;
   }, [edits, rows]);
 
   const applyEdits = async () => {
-    const changes: BulkChange[] = Object.entries(edits).map(([id, fields]) => ({
-      id: Number(id),
+    const changes: BulkChange[] = Object.values(edits).map(({ productId, variantId, ...fields }) => ({
+      id: productId,
+      ...(variantId ? { variant_id: variantId } : {}),
       ...fields,
     }));
     if (changes.length === 0) return;
@@ -183,48 +242,72 @@ const BulkEdit = () => {
         <CardContent
           className={`overflow-x-auto transition-opacity ${refreshing ? 'opacity-60' : 'opacity-100'}`}
         >
-          {isInitialLoading ? <TableSkeleton rows={8} columns={5} /> : (
-          <Table className="min-w-[700px]">
+          {isInitialLoading ? <TableSkeleton rows={8} columns={6} /> : (
+          <Table className="min-w-[820px]">
             <TableHeader>
               <TableRow>
                 <TableHead>Product</TableHead>
                 <TableHead>Category</TableHead>
+                <TableHead className="w-40">Size</TableHead>
                 <TableHead className="w-32">Price (₹)</TableHead>
-                <TableHead className="w-32">Discount (₹)</TableHead>
+                <TableHead className="w-32">Discounted Price (₹)</TableHead>
                 <TableHead className="w-28">Stock</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {visible.map(row => (
+              {visible.map(row => {
+                const variant = activeVariant(row);
+                const dirtyClass = 'border-amber-500 bg-amber-50 dark:bg-amber-950/30';
+                return (
                 <TableRow key={row.id}>
                   <TableCell className="font-medium">{row.name}</TableCell>
                   <TableCell className="text-muted-foreground">{row.category_name || '—'}</TableCell>
                   <TableCell>
+                    {row.variants?.length ? (
+                      <Select
+                        value={variant ? String(variant.id) : 'base'}
+                        onValueChange={(v) => setSizeChoice(prev => ({ ...prev, [row.id]: v }))}
+                      >
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {row.variants.map(v => (
+                            <SelectItem key={v.id} value={String(v.id)}>
+                              {v.label}{v.is_default ? ' (default)' : ''}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
                     <Input
                       type="number" inputMode="decimal"
-                      className={isDirty(row.id, 'price') ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/30' : ''}
+                      className={isDirty(row, 'price') ? dirtyClass : ''}
                       value={cellValue(row, 'price')}
-                      onChange={(e) => setEdit(row.id, 'price', e.target.value)}
+                      onChange={(e) => setEdit(row, 'price', e.target.value)}
                     />
                   </TableCell>
                   <TableCell>
                     <Input
                       type="number" inputMode="decimal" placeholder="none"
-                      className={isDirty(row.id, 'discount_price') ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/30' : ''}
+                      className={isDirty(row, 'discount_price') ? dirtyClass : ''}
                       value={cellValue(row, 'discount_price')}
-                      onChange={(e) => setEdit(row.id, 'discount_price', e.target.value)}
+                      onChange={(e) => setEdit(row, 'discount_price', e.target.value)}
                     />
                   </TableCell>
                   <TableCell>
                     <Input
                       type="number" inputMode="numeric"
-                      className={isDirty(row.id, 'stock') ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/30' : ''}
+                      className={isDirty(row, 'stock') ? dirtyClass : ''}
                       value={cellValue(row, 'stock')}
-                      onChange={(e) => setEdit(row.id, 'stock', e.target.value)}
+                      onChange={(e) => setEdit(row, 'stock', e.target.value)}
                     />
                   </TableCell>
                 </TableRow>
-              ))}
+                );
+              })}
             </TableBody>
           </Table>
           )}
@@ -292,9 +375,12 @@ const BulkEdit = () => {
                 {preview.rows.map((r, i) => (
                   <div key={i} className={`rounded border p-2 text-sm ${r.error ? 'border-amber-300 bg-amber-50 dark:bg-amber-950/20' : ''}`}>
                     <span className="font-medium">{r.name}</span>
+                    {r.size && <span className="text-muted-foreground"> ({r.size})</span>}
                     {r.error
                       ? <span className="text-amber-700"> — {r.error}</span>
-                      : <span className="text-muted-foreground"> — {Object.entries(r.changes).map(([k, v]) => `${k.replace('_', ' ')}: ${v || 'none'}`).join(', ')}</span>}
+                      // variant_id rides along in `changes` so the row can be
+                      // applied as-is; it's plumbing, not a field the admin edited.
+                      : <span className="text-muted-foreground"> — {Object.entries(r.changes).filter(([k]) => k !== 'variant_id').map(([k, v]) => `${FIELD_LABELS[k] ?? k.replace('_', ' ')}: ${v || 'none'}`).join(', ')}</span>}
                   </div>
                 ))}
               </div>

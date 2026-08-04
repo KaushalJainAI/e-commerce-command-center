@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAdminData } from '@/hooks/useAdminData';
 import { TableSkeleton } from '@/components/TableSkeleton';
 import { 
@@ -57,7 +58,12 @@ const ContactSubmissions = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [replyDialogOpen, setReplyDialogOpen] = useState(false);
   const [replyNotes, setReplyNotes] = useState('');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  // The dashboard's "Read messages" card deep-links to /contact?status=new.
+  const [searchParams] = useSearchParams();
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => {
+    const s = searchParams.get('status');
+    return s === 'new' || s === 'read' || s === 'replied' || s === 'closed' ? s : 'all';
+  });
   const { toast } = useToast();
 
   const handleMarkRead = async (submission: ContactSubmission) => {

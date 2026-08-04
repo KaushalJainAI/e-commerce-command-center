@@ -37,8 +37,11 @@ const Combos = () => {
     name: '',
     slug: '',
     description: '',
-    items: [] as { product: string; quantity: number }[],
-    price: '',
+    // `variant` is the packaging size bundled — the unit of price and stock.
+    items: [] as { product: string; variant: string; quantity: number }[],
+    // NOTE: no `price`. A combo's MRP is DERIVED server-side as the sum of its
+    // component sizes' prices, so it is displayed (see computedMrp) but never
+    // typed or posted. `discount_price` is the only price an admin sets.
     discount_price: '',
     weight: '',
     unit: 'g',
@@ -73,7 +76,7 @@ const Combos = () => {
     form.append('name', formData.name);
     if (formData.slug && !editingCombo) form.append('slug', formData.slug);
     if (formData.description) form.append('description', formData.description);
-    form.append('price', String(parseNumberOrZero(formData.price)));
+    // No `price`: the server derives the MRP from the items posted below.
     if (formData.discount_price) {
       form.append('discount_price', String(parseNumberOrZero(formData.discount_price)));
     }
@@ -83,12 +86,15 @@ const Combos = () => {
     form.append('is_active', String(formData.is_active));
     form.append('is_featured', String(formData.is_featured));
     
-    // Build items array - use product ID (not slug)
+    // Build items array — send the SIZE (variant) as well as the product. The
+    // backend keys the component on the variant; sending product alone makes it
+    // fall back to the default size, which is what we're fixing.
     const items = formData.items
       .filter((i) => i.product !== '')
-      .map((i) => ({ 
+      .map((i) => ({
         product: i.product,  // This should be the product ID
-        quantity: i.quantity || 1 
+        variant: i.variant || undefined,
+        quantity: i.quantity || 1
       }));
     
     // Always append items as JSON string
@@ -112,7 +118,25 @@ const Combos = () => {
       });
       return;
     }
-    
+
+    // Mirror the server's rule, so the admin sees the problem next to the field
+    // rather than as a 400 after upload. The MRP is derived, so a selling price
+    // at or above it means the bundle is no cheaper than buying the parts.
+    // `>` not `>=`: the server (ProductCombo.clean / ProductComboSerializer.validate)
+    // permits a bundle priced exactly AT the sum of its parts — a legitimate
+    // curation with no discount, which the field's own help text promises. Only
+    // charging MORE than à-la-carte is wrong.
+    const sellingPrice = parseNumberOrZero(formData.discount_price);
+    if (formData.discount_price && sellingPrice > computedMrp) {
+      toast({
+        title: 'Validation error',
+        description: `Selling price cannot exceed the MRP of ₹${computedMrp.toFixed(2)}.`,
+        variant: 'destructive',
+      });
+      return;
+    }
+
+
     setSubmitting(true);
     
     try {
@@ -186,7 +210,7 @@ const handleToggleStatus = async (combo: Combo) => {
     await fetchAllProducts();
     setFormData((prev) => ({
       ...prev,
-      items: [...prev.items, { product: '', quantity: 1 }],
+      items: [...prev.items, { product: '', variant: '', quantity: 1 }],
     }));
   };
 
@@ -199,12 +223,20 @@ const handleToggleStatus = async (combo: Combo) => {
 
   const updateItem = (
     index: number,
-    field: 'product' | 'quantity',
+    field: 'product' | 'variant' | 'quantity',
     value: string | number,
   ) => {
     setFormData((prev) => {
       const updated = [...prev.items];
       updated[index] = { ...updated[index], [field]: value };
+      // Switching product invalidates the chosen size — preselect that
+      // product's default so the line is never left without one.
+      if (field === 'product') {
+        const product = allProducts.find(p => String(p.id) === String(value));
+        const sizes = (product?.variants || []).filter(v => v.is_active);
+        const preferred = sizes.find(v => v.is_default) ?? sizes[0];
+        updated[index].variant = preferred ? String(preferred.id) : '';
+      }
       return { ...prev, items: updated };
     });
   };
@@ -221,6 +253,7 @@ const handleToggleStatus = async (combo: Combo) => {
       // Map items - use product ID from the response
       const mappedItems = (fullCombo.items || []).map((i: ComboItem) => ({
         product: String(i.product),  // This is the product ID
+        variant: i.variant ? String(i.variant) : '',
         quantity: i.quantity,
       }));
       
@@ -230,7 +263,7 @@ const handleToggleStatus = async (combo: Combo) => {
         slug: fullCombo.slug,
         description: fullCombo.description || '',
         items: mappedItems,
-        price: fullCombo.price !== undefined && fullCombo.price !== null ? String(fullCombo.price) : '',
+        // No `price` — it is derived from `items` and shown read-only.
         discount_price: fullCombo.discount_price !== undefined && fullCombo.discount_price !== null ? String(fullCombo.discount_price) : '',
         weight: fullCombo.weight !== undefined && fullCombo.weight !== null ? String(fullCombo.weight) : '',
         unit: fullCombo.unit || 'g',
@@ -260,7 +293,6 @@ const handleToggleStatus = async (combo: Combo) => {
       slug: '',
       description: '',
       items: [],
-      price: '',
       discount_price: '',
       weight: '',
       unit: 'g',
@@ -292,6 +324,19 @@ const handleToggleStatus = async (combo: Combo) => {
     return allProducts.find(p => String(p.id) === String(productId));
   };
 
+  /**
+   * The MRP the backend will derive: sum of each component SIZE's price times
+   * its quantity. Must price off the variant, not `product.price` (a mirror of
+   * whichever size happens to be default), or the figure shown here disagrees
+   * with the one the API returns after saving.
+   */
+  const computedMrp = formData.items.reduce((total, item) => {
+    const product = getProductById(item.product);
+    const size = (product?.variants || []).find(v => String(v.id) === item.variant);
+    const unitPrice = Number(size?.price ?? product?.price ?? 0);
+    return total + unitPrice * (item.quantity || 1);
+  }, 0);
+
   return (
     <div className="space-y-6 p-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -320,7 +365,7 @@ const handleToggleStatus = async (combo: Combo) => {
                 <TableHead>Name</TableHead>
                 <TableHead>Products</TableHead>
                 <TableHead>Price</TableHead>
-                <TableHead>Discount</TableHead>
+                <TableHead>Discounted Price</TableHead>
                 <TableHead>Weight</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -476,20 +521,20 @@ const handleToggleStatus = async (combo: Combo) => {
             
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="price">Price *</Label>
+                <Label htmlFor="mrp">MRP (from components)</Label>
                 <Input
-                  id="price"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={formData.price}
-                  onChange={e => setFormData({ ...formData, price: e.target.value })}
-                  required
-                  placeholder="0.00"
+                  id="mrp"
+                  value={`₹${computedMrp.toFixed(2)}`}
+                  readOnly
+                  disabled
+                  className="bg-muted font-mono"
                 />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Sum of the component sizes below. To change it, change the components.
+                </p>
               </div>
               <div>
-                <Label htmlFor="discount_price">Discount Price</Label>
+                <Label htmlFor="discount_price">Selling Price *</Label>
                 <Input
                   id="discount_price"
                   type="number"
@@ -499,6 +544,9 @@ const handleToggleStatus = async (combo: Combo) => {
                   onChange={e => setFormData({ ...formData, discount_price: e.target.value })}
                   placeholder="0.00"
                 />
+                <p className="text-xs text-muted-foreground mt-1">
+                  What the bundle actually sells for. Leave blank to sell at MRP.
+                </p>
               </div>
             </div>
 
@@ -607,25 +655,61 @@ const handleToggleStatus = async (combo: Combo) => {
                           )}
                         </div>
                         
-                        {selectedProduct && !isProductMissing && (
-                          <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-md">
-                            {selectedProduct.image &&
-                              <img src={selectedProduct.image} alt={selectedProduct.name} className="h-12 w-12 rounded object-cover" />}
-                            <div className="flex-1 text-sm space-y-1">
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium">{selectedProduct.name}</span>
-                                {selectedProduct.in_stock
-                                  ? <span className="text-xs text-green-600 bg-green-100 px-2 py-0.5 rounded">In Stock</span>
-                                  : <span className="text-xs text-red-600 bg-red-100 px-2 py-0.5 rounded">Out of Stock</span>}
+                        {selectedProduct && !isProductMissing && (() => {
+                          // The combo consumes a SIZE, so the size drives both
+                          // the picker below and the price/stock shown.
+                          const sizes = (selectedProduct.variants || []).filter(v => v.is_active);
+                          const selectedSize = sizes.find(v => String(v.id) === item.variant) ?? null;
+                          return (
+                            <>
+                              <div>
+                                <Label htmlFor={`size-${index}`}>Size</Label>
+                                <Select
+                                  value={item.variant || ''}
+                                  onValueChange={value => updateItem(index, 'variant', value)}
+                                >
+                                  <SelectTrigger id={`size-${index}`}>
+                                    <SelectValue placeholder="Select size" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {sizes.map(v => (
+                                      <SelectItem key={v.id} value={String(v.id)}>
+                                        {v.formatted_weight || 'Default size'}
+                                        {v.is_default ? ' (default)' : ''} — ₹{Number(v.price).toFixed(2)}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                {sizes.length === 0 && (
+                                  <p className="text-xs text-red-600 mt-1">
+                                    This product has no active size and cannot be added to a combo.
+                                  </p>
+                                )}
                               </div>
-                              <div className="text-muted-foreground flex gap-4">
-                                <span>Price: ₹{Number(selectedProduct.price).toFixed(2)}</span>
-                                <span>Weight: {selectedProduct.weight}</span>
-                                <span>Stock: {selectedProduct.stock}</span>
+
+                              <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-md">
+                                {selectedProduct.image &&
+                                  <img src={selectedProduct.image} alt={selectedProduct.name} className="h-12 w-12 rounded object-cover" />}
+                                <div className="flex-1 text-sm space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-medium">
+                                      {selectedProduct.name}
+                                      {selectedSize?.formatted_weight ? ` (${selectedSize.formatted_weight})` : ''}
+                                    </span>
+                                    {(selectedSize ? selectedSize.stock > 0 : selectedProduct.in_stock)
+                                      ? <span className="text-xs text-green-600 bg-green-100 px-2 py-0.5 rounded">In Stock</span>
+                                      : <span className="text-xs text-red-600 bg-red-100 px-2 py-0.5 rounded">Out of Stock</span>}
+                                  </div>
+                                  <div className="text-muted-foreground flex gap-4">
+                                    <span>Price: ₹{Number(selectedSize?.price ?? selectedProduct.price).toFixed(2)}</span>
+                                    <span>Weight: {selectedSize?.formatted_weight || selectedProduct.weight}</span>
+                                    <span>Stock: {selectedSize?.stock ?? selectedProduct.stock}</span>
+                                  </div>
+                                </div>
                               </div>
-                            </div>
-                          </div>
-                        )}
+                            </>
+                          );
+                        })()}
                       </div>
                       
                       <div className="w-24">
@@ -674,18 +758,12 @@ const handleToggleStatus = async (combo: Combo) => {
               {formData.items.length > 0 && (
                 <div className="border-t pt-3 mt-2">
                   <div className="flex justify-between items-center text-sm">
-                    <span className="font-medium">Total Product Value:</span>
-                    <span className="font-mono font-semibold">
-                      ₹{formData.items.reduce((total, item) => {
-                        const product = getProductById(item.product);
-                        if (product)
-                          return total + (Number(product.price) * item.quantity);
-                        return total;
-                      }, 0).toFixed(2)}
-                    </span>
+                    <span className="font-medium">Combo MRP:</span>
+                    <span className="font-mono font-semibold">₹{computedMrp.toFixed(2)}</span>
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
-                    This is the sum of individual product prices. Set your combo price below.
+                    The sum of these component sizes — this IS the combo's MRP. GST is
+                    charged per component at its own product's rate.
                   </p>
                 </div>
               )}

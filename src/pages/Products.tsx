@@ -10,6 +10,7 @@ import {
 } from '@/api/products';
 import { getCategories, Category } from '@/api/categories';
 import { getSections, ProductSection } from '@/api/sections';
+import { getHsnReference, HsnCode } from '@/api/gst';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -57,6 +58,10 @@ const Products = () => {
     useAdminData(['categories'], () => getCategories().then(r => r.data || []));
   const { data: sections = [] } = useAdminData(['sections'], () => getSections());
   const { data: spiceForms = [] } = useAdminData(['spice-forms'], () => getSpiceForms());
+  // Static reference data (the curated HSN code list + the statutory rate for
+  // each). Cached like the other near-static lookups — it changes when the law
+  // changes, not when the catalogue does.
+  const { data: hsnRef } = useAdminData(['hsn-reference'], () => getHsnReference());
   const [selectedSections, setSelectedSections] = useState<number[]>([]);
   // The dashboard's "Restock products" button deep-links to /products?stock=low.
   const [searchParams] = useSearchParams();
@@ -66,7 +71,7 @@ const Products = () => {
     const s = searchParams.get('stock');
     return s === 'low' || s === 'out' ? s : 'all';
   });
-  const [sortBy, setSortBy] = useState<'newest' | 'name' | 'priceLow' | 'priceHigh' | 'stockLow'>('newest');
+  const [sortBy, setSortBy] = useState<'newest' | 'name' | 'priceLow' | 'priceHigh' | 'stockLow'>('name');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [formData, setFormData] = useState({
@@ -76,7 +81,8 @@ const Products = () => {
     spice_form: '',
     price: '',
     discount_price: '',
-    tax_rate: '0',
+    tax_rate: '5',
+    hsn_code: '',
     stock: '',
     low_stock_threshold: '5',
     weight: '',
@@ -112,6 +118,17 @@ const Products = () => {
     const n = parseFloat(value);
     return Number.isNaN(n) ? 0 : n;
   };
+
+  // ---- GST classification helpers ----
+  // The reference row for whatever code is currently typed/selected, and the
+  // statutory rate that goes with it. Both are ADVISORY: the admin types the
+  // rate, this only makes a disagreement visible. Auto-applying it would change
+  // how every future invoice splits the price, silently.
+  const hsnCodes: HsnCode[] = hsnRef?.codes ?? [];
+  const selectedHsn = hsnCodes.find(c => c.code === (formData.hsn_code || '').trim());
+  const enteredRate = parseFloat(formData.tax_rate);
+  const rateDiffers =
+    !!selectedHsn && Number.isFinite(enteredRate) && enteredRate !== selectedHsn.gst_rate;
 
   const toggleSection = (sectionId: number) => {
     setSelectedSections((prev) =>
@@ -166,9 +183,13 @@ const Products = () => {
     // Per-product low-stock alert level (emails the admin when stock falls to
     // or below this). Product-level threshold; sizes can have their own too.
     form.append('low_stock_threshold', String(parseInt(formData.low_stock_threshold ?? '5') || 0));
-    // Per-product GST rate (%). Frontend default is 0; set per product
-    // (e.g. 5 for taxable goods, 0 for papad / papad katran).
-    form.append('tax_rate', String(parseNumberOrZero(formData.tax_rate || '0')));
+    // Per-product GST rate (%), matching the backend model default of 5. Prices
+    // are GST-INCLUSIVE, so this only splits the price on the invoice — it never
+    // changes what the customer pays. 0 for exempt goods (papad / papad katran).
+    form.append('tax_rate', String(parseNumberOrZero(formData.tax_rate || '5')));
+    // Sent even when blank, so an admin can CLEAR a code they decided was wrong.
+    // Blank is a meaningful value here ("not classified yet"), not a no-op.
+    form.append('hsn_code', (formData.hsn_code || '').trim());
     form.append('weight', String(parseNumberOrZero(def?.weight ?? '0')));
     form.append('unit', def?.unit || 'g');
     if (formData.origin_country) form.append('origin_country', formData.origin_country);
@@ -216,7 +237,7 @@ const Products = () => {
       if (!(parseNumberOrZero(r.weight) > 0)) return 'Each size needs a weight greater than 0.';
       if (!(parseNumberOrZero(r.price) > 0)) return 'Each size needs a price greater than 0.';
       if (r.discount_price && parseNumberOrZero(r.discount_price) >= parseNumberOrZero(r.price))
-        return 'Discount price must be less than the price for every size.';
+        return 'Discounted price must be less than the price for every size.';
     }
     return null;
   };
@@ -333,7 +354,8 @@ const Products = () => {
         spice_form: fullProduct.spice_form || '',
         price: fullProduct.price !== undefined && fullProduct.price !== null ? String(fullProduct.price) : '',
         discount_price: fullProduct.discount_price !== undefined && fullProduct.discount_price !== null ? String(fullProduct.discount_price) : '',
-        tax_rate: fullProduct.tax_rate !== undefined && fullProduct.tax_rate !== null ? String(fullProduct.tax_rate) : '0',
+        tax_rate: fullProduct.tax_rate !== undefined && fullProduct.tax_rate !== null ? String(fullProduct.tax_rate) : '5',
+        hsn_code: fullProduct.hsn_code || '',
         stock: String(fullProduct.stock ?? 0),
         low_stock_threshold: fullProduct.low_stock_threshold != null ? String(fullProduct.low_stock_threshold) : '5',
         weight: fullProduct.weight !== undefined && fullProduct.weight !== null ? String(fullProduct.weight) : '',
@@ -405,7 +427,7 @@ const Products = () => {
       spice_form: '',
       price: '',
       discount_price: '',
-      tax_rate: '0',
+      tax_rate: '5',
       stock: '',
       low_stock_threshold: '5',
       weight: '',
@@ -458,7 +480,8 @@ const Products = () => {
         spice_form: fullProduct.spice_form || '',
         price: fullProduct.price != null ? String(fullProduct.price) : '',
         discount_price: fullProduct.discount_price != null ? String(fullProduct.discount_price) : '',
-        tax_rate: fullProduct.tax_rate != null ? String(fullProduct.tax_rate) : '0',
+        tax_rate: fullProduct.tax_rate != null ? String(fullProduct.tax_rate) : '5',
+        hsn_code: fullProduct.hsn_code || '',
         stock: '0',
         low_stock_threshold: fullProduct.low_stock_threshold != null ? String(fullProduct.low_stock_threshold) : '5',
         weight: fullProduct.weight != null ? String(fullProduct.weight) : '',
@@ -887,6 +910,7 @@ const Products = () => {
                   <Label className="text-base">Packaging Sizes</Label>
                   <p className="text-xs text-muted-foreground">
                     Each size is sold separately. Pick one as the default (shown first / used for the "from" price).
+                    Enter prices <strong>inclusive of GST</strong> — this is the final amount the customer pays.
                   </p>
                 </div>
                 <Button type="button" variant="outline" size="sm" onClick={addVariantRow}>
@@ -922,7 +946,7 @@ const Products = () => {
                         placeholder="0.00" />
                     </div>
                     <div className="col-span-3 sm:col-span-2">
-                      <Label className="text-xs">Discount</Label>
+                      <Label className="text-xs">Discounted Price</Label>
                       <Input type="number" step="0.01" min="0" value={row.discount_price}
                         onChange={e => updateVariantRow(row.key, { discount_price: e.target.value })}
                         placeholder="—" />
@@ -997,10 +1021,105 @@ const Products = () => {
                   placeholder="5"
                 />
                 <p className="text-xs text-muted-foreground mt-1">
-                  Default 0. Set 5 for taxable goods; keep 0 for exempt items
-                  like papad / papad katran.
+                  The price above is <strong>inclusive of GST</strong> — this rate
+                  only controls how that price is split on the invoice, never what
+                  the customer pays. Default 5; set 0 for exempt items like papad /
+                  papad katran.
                 </p>
               </div>
+            </div>
+
+            {/* ---- GST classification (HSN) ----
+                Its own block rather than another cell in the grid above: the
+                code drives what gets filed, and it needs room for the statutory
+                rate, the caveat on the chosen heading, and the mismatch warning.
+                Nothing here ever writes tax_rate on its own — the "Use N%"
+                button is an explicit click, because what we charge is the
+                owner's decision and a silent rate change would re-split the GST
+                on every future invoice. */}
+            <div className="space-y-2 rounded-lg border p-3">
+              <div>
+                <Label htmlFor="hsn_code" className="text-base">HSN code (GST returns)</Label>
+                <p className="text-xs text-muted-foreground">
+                  The tariff heading this product is filed under. GSTR-1 Table 12
+                  is an HSN-wise summary, and the tax rate above cannot stand in
+                  for it — 5% covers many different headings.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <Select
+                    value={formData.hsn_code || 'none'}
+                    onValueChange={v =>
+                      setFormData({ ...formData, hsn_code: v === 'none' ? '' : v })}
+                  >
+                    <SelectTrigger id="hsn_code">
+                      <SelectValue placeholder="Choose a code" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Not classified yet</SelectItem>
+                      {hsnCodes.map(c => (
+                        <SelectItem key={c.code} value={c.code}>
+                          {c.code} — {c.description} ({c.gst_rate}%)
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Input
+                    aria-label="HSN code (typed)"
+                    value={formData.hsn_code}
+                    onChange={e => setFormData({ ...formData, hsn_code: e.target.value })}
+                    placeholder="or type 4, 6 or 8 digits"
+                  />
+                </div>
+              </div>
+
+              {selectedHsn && (
+                <div className="rounded-md bg-muted/50 p-2 text-xs space-y-1">
+                  <p>
+                    <strong>{selectedHsn.code}</strong> — {selectedHsn.description}.
+                    {' '}Current GST rate for this code:{' '}
+                    <strong>{selectedHsn.gst_rate}%</strong>
+                    {hsnRef?.rates_as_of && <> (as of {hsnRef.rates_as_of})</>}.
+                  </p>
+                  {selectedHsn.note && (
+                    <p className="text-muted-foreground">{selectedHsn.note}</p>
+                  )}
+                </div>
+              )}
+
+              {rateDiffers && (
+                <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-2 text-xs space-y-2">
+                  <p>
+                    You are charging <strong>{enteredRate}%</strong> but the published
+                    rate for {selectedHsn!.code} is{' '}
+                    <strong>{selectedHsn!.gst_rate}%</strong>. That can be
+                    deliberate — but if it isn't, every sale of this product is
+                    filed at the wrong rate.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setFormData({
+                      ...formData, tax_rate: String(selectedHsn!.gst_rate),
+                    })}
+                  >
+                    Use {selectedHsn!.gst_rate}%
+                  </Button>
+                </div>
+              )}
+
+              {!formData.hsn_code && (
+                <p className="text-xs text-muted-foreground">
+                  Leave blank if you haven't decided. Sales of an unclassified
+                  product show up under "NOT CLASSIFIED" in the HSN summary, so
+                  the gap stays visible instead of quietly going missing.
+                </p>
+              )}
             </div>
 
             {/* Homepage Sections */}

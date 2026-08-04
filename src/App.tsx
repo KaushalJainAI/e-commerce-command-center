@@ -31,6 +31,7 @@ const Coupons = lazy(() => import("./pages/Coupons"));
 const AdminInfo = lazy(() => import("./pages/AdminInfo"));
 const ContactSubmissions = lazy(() => import("./pages/ContactSubmissions"));
 const Conversations = lazy(() => import("./pages/Conversations"));
+const GstReport = lazy(() => import("./pages/GstReport"));
 
 const queryClient = new QueryClient({
   // One place for load failures. Pages used to toast from inside their own
@@ -101,6 +102,7 @@ const App = () => (
               <Route path="admin-info" element={page(<AdminInfo />)} />
               <Route path="contact" element={page(<ContactSubmissions />)} />
               <Route path="conversations" element={page(<Conversations />)} />
+              <Route path="gst" element={page(<GstReport />)} />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>

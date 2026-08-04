@@ -9,7 +9,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import {
   Package, ShoppingCart, MessagesSquare, AlertTriangle,
-  IndianRupee, PackageCheck, CheckCircle2, ArrowRight,
+  IndianRupee, PackageCheck, CheckCircle2, ArrowRight, MailOpen, MessageCircle,
+  Banknote, Receipt, Truck,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
@@ -100,6 +101,24 @@ const Dashboard = () => {
       urgent: true,
     },
     {
+      key: 'unread-chats',
+      count: actions.unread_chats,
+      sentence: `${plural(actions.unread_chats, 'unread conversation')} — the customer wrote last and nobody has replied.`,
+      buttonLabel: 'Open chats',
+      to: '/conversations',
+      icon: MessageCircle,
+      urgent: true,
+    },
+    {
+      key: 'contacts',
+      count: actions.new_contacts,
+      sentence: `${plural(actions.new_contacts, 'unread contact message')} from the Contact Us form.`,
+      buttonLabel: 'Read messages',
+      to: '/contact?status=new',
+      icon: MailOpen,
+      urgent: true,
+    },
+    {
       key: 'stuck',
       count: actions.stuck_payments,
       sentence: `${plural(actions.stuck_payments, 'online payment')} looking stuck — these fix themselves automatically, but keep an eye out.`,
@@ -125,6 +144,17 @@ const Dashboard = () => {
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold">₹{Number(actions?.today_revenue || 0).toLocaleString('en-IN')}</div>
+            <p className="text-xs text-muted-foreground mt-1">
+              Includes GST ₹{Number(actions?.today_gst_collected || 0).toLocaleString('en-IN')}
+            </p>
+            {/* The headline stays GROSS — it is what reconciles against gateway
+                settlements — but gross alone reads as net, so the netted figure
+                is stated whenever refunds actually moved it. */}
+            {Number(actions?.today_revenue || 0) !== Number(actions?.today_net_revenue || 0) && (
+              <p className="text-xs text-orange-600 mt-0.5">
+                ₹{Number(actions?.today_net_revenue || 0).toLocaleString('en-IN')} net of refunds
+              </p>
+            )}
           </CardContent>
         </Card>
         <Card>
@@ -134,6 +164,149 @@ const Dashboard = () => {
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold">{actions?.today_orders ?? 0}</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* GST + delivery economics.
+          The GST tile reports two FACTS and stops: what we sold, and what tax
+          we collected on it. It deliberately does not answer "how much do I
+          owe" — that needs input credit on every purchase (ingredients,
+          packaging, courier, rent), none of which this system tracks. Deciding
+          what to pay is the owner's call, made in their books. */}
+      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium">GST collected this month</CardTitle>
+            <Receipt className="h-5 w-5 text-primary" />
+          </CardHeader>
+          <CardContent>
+            {/* Lead with the NET figure — collected minus reversed by refunds —
+                because that is the tax actually still in hand. The gross
+                number is broken out underneath so the two reconcile. */}
+            <div className="text-3xl font-bold">
+              ₹{Number(actions?.mtd_gst_net_collected || 0).toLocaleString('en-IN')}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">
+              ₹{Number(actions?.today_gst_net_collected || 0).toLocaleString('en-IN')} today
+            </p>
+            <div className="mt-2 space-y-0.5 text-xs">
+              {/* The sales side of the same fact: tax collected means nothing
+                  without the value it was collected on. */}
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Sold (excl. GST)</span>
+                <span>₹{Number(actions?.mtd_taxable_sales || 0).toLocaleString('en-IN')}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">GST collected on it</span>
+                <span>₹{Number(actions?.mtd_gst_collected || 0).toLocaleString('en-IN')}</span>
+              </div>
+              {Number(actions?.mtd_gst_refunded || 0) > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Returned with refunds</span>
+                  <span className="text-orange-600">
+                    −₹{Number(actions.mtd_gst_refunded).toLocaleString('en-IN')}
+                  </span>
+                </div>
+              )}
+              {/* GST we PAID Razorpay on their fee — the one input credit this
+                  system has evidence for. Listed separately, never subtracted:
+                  netting one input out of many would turn an honest fact into
+                  a fake payable. */}
+              {Number(actions?.mtd_gateway_tax || 0) > 0 && (
+                <div className="flex justify-between border-t pt-0.5">
+                  <span className="text-muted-foreground">
+                    GST you paid on gateway fees
+                  </span>
+                  <span className="text-green-600">
+                    ₹{Number(actions.mtd_gateway_tax).toLocaleString('en-IN')}
+                  </span>
+                </div>
+              )}
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-2 leading-snug">
+              What you sold and the tax you took on it. <strong>This is not a
+              payable figure</strong> — what you remit is this less input credit
+              on your purchases, which lives in your books, not here. The
+              gateway GST above is one such credit, shown for you to carry over.
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium">Delivery today</CardTitle>
+            <Truck className="h-5 w-5 text-primary" />
+          </CardHeader>
+          <CardContent className="space-y-1">
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Collected</span>
+              <span className="font-semibold">
+                ₹{Number(actions?.today_shipping_collected || 0).toLocaleString('en-IN')}
+              </span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Courier cost</span>
+              <span className="font-semibold">
+                ₹{Number(actions?.today_shipping_cost || 0).toLocaleString('en-IN')}
+              </span>
+            </div>
+            <div className="flex justify-between text-sm border-t pt-1">
+              <span className="text-muted-foreground">Margin</span>
+              <span
+                className={
+                  Number(actions?.today_shipping_margin || 0) >= 0
+                    ? 'font-bold text-green-600'
+                    : 'font-bold text-red-600'
+                }
+              >
+                ₹{Number(actions?.today_shipping_margin || 0).toLocaleString('en-IN')}
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground pt-1">
+              {actions?.today_shipping_cost_recorded
+                ? `Avg ₹${Number(actions.today_avg_shipping_cost || 0).toLocaleString('en-IN')} across ${actions.today_shipping_cost_recorded} order${actions.today_shipping_cost_recorded === 1 ? '' : 's'} with a cost recorded.`
+                : 'No courier costs recorded today — add them on each order to see real margin.'}
+            </p>
+          </CardContent>
+        </Card>
+
+        {/* COD cash. Revenue above is accrued at order date whether or not the
+            money arrived; this tile is the other half — what is actually in
+            hand. Cash sitting with a courier for weeks is the single easiest
+            thing to lose track of in a COD business. */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium">COD cash</CardTitle>
+            <Banknote className="h-5 w-5 text-primary" />
+          </CardHeader>
+          <CardContent className="space-y-1">
+            <div
+              className={`text-2xl font-bold ${
+                Number(actions?.cod_pending_amount || 0) > 0 ? 'text-amber-600' : ''
+              }`}
+            >
+              ₹{Number(actions?.cod_pending_amount || 0).toLocaleString('en-IN')}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Uncollected across {actions?.cod_pending_count || 0} dispatched order
+              {actions?.cod_pending_count === 1 ? '' : 's'}
+            </p>
+            {!!actions?.cod_pending_aged_count && (
+              <p className="text-xs font-medium text-red-600">
+                {actions.cod_pending_aged_count} older than 7 days — chase these.
+              </p>
+            )}
+            <div className="flex justify-between text-sm border-t pt-1">
+              <span className="text-muted-foreground">Confirmed today</span>
+              <span className="font-semibold text-green-600">
+                ₹{Number(actions?.cod_collected_today || 0).toLocaleString('en-IN')}
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground pt-1">
+              Tick <strong>Paid in cash</strong> on an order once the money is in
+              hand. Until then it can't be refunded either.
+            </p>
           </CardContent>
         </Card>
       </div>
