@@ -18,8 +18,11 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { checkImageFile } from '@/lib/imageCheck';
 import { Plus, Edit, EyeOff, Eye } from 'lucide-react';
+import { PageHelp } from '@/components/PageHelp';
+import { useTranslation } from 'react-i18next';
 
 const Categories = () => {
+  const { t } = useTranslation();
   const {
     data: categories = [], isInitialLoading, refreshing, refetch: fetchCategories,
   } = useAdminData(['categories'], () => getCategories().then(res => res.data));
@@ -50,11 +53,18 @@ const Categories = () => {
     if (!file) return;
     const check = await checkImageFile(file);
     if (!check.ok) {
-      toast({ title: 'Photo problem', description: check.error, variant: 'destructive' });
+      toast({
+        title: t('imageCheck.problemTitle'),
+        description: t(check.errorKey!, check.params),
+        variant: 'destructive',
+      });
       return;
     }
-    if (check.warning) {
-      toast({ title: 'Small photo', description: check.warning });
+    if (check.warningKey) {
+      toast({
+        title: t('imageCheck.smallTitle'),
+        description: t(check.warningKey, check.params),
+      });
     }
     setImageFile(file);
     setImagePreview(URL.createObjectURL(file));
@@ -62,7 +72,11 @@ const Categories = () => {
 
   const handleSubmit = async () => {
     if (!formData.name.trim()) {
-      toast({ title: 'Name needed', description: 'Please type a category name first.', variant: 'destructive' });
+      toast({
+        title: t('categories.nameNeededTitle'),
+        description: t('categories.nameNeededBody'),
+        variant: 'destructive',
+      });
       return;
     }
     setSaving(true);
@@ -73,18 +87,26 @@ const Categories = () => {
       if (imageFile) form.append('image', imageFile);
       if (editing) {
         await updateCategory(editing.slug || editing.id, form);
-        toast({ title: 'Saved', description: `"${formData.name}" updated.` });
+        toast({
+          title: t('categories.savedTitle'),
+          description: t('categories.savedBody', { name: formData.name }),
+        });
       } else {
         await createCategory(form);
-        toast({ title: 'Created', description: `Category "${formData.name}" added.` });
+        toast({
+          title: t('categories.createdTitle'),
+          description: t('categories.createdBody', { name: formData.name }),
+        });
       }
       setDialogOpen(false);
       resetForm();
       fetchCategories();
     } catch (error) {
       toast({
-        title: 'Error',
-        description: error instanceof Error && error.message ? error.message : 'Could not save the category.',
+        title: t('common.error'),
+        description: error instanceof Error && error.message
+          ? error.message
+          : t('categories.saveFailed'),
         variant: 'destructive',
       });
     } finally {
@@ -94,23 +116,37 @@ const Categories = () => {
 
   // "Delete" is a soft hide on the backend (is_active=False) — say so plainly.
   const handleHide = async (category: Category) => {
-    if (!confirm(`Hide "${category.name}" from the store? Its products stay safe — you can show the category again any time.`)) return;
+    if (!confirm(t('categories.confirmHide', { name: category.name }))) return;
     try {
       await deleteCategory(category.slug || category.id);
-      toast({ title: 'Hidden', description: `"${category.name}" is no longer shown in the store.` });
+      toast({
+        title: t('categories.hiddenTitle'),
+        description: t('categories.hiddenBody', { name: category.name }),
+      });
       fetchCategories();
     } catch {
-      toast({ title: 'Error', description: 'Could not hide the category.', variant: 'destructive' });
+      toast({
+        title: t('common.error'),
+        description: t('categories.hideFailed'),
+        variant: 'destructive',
+      });
     }
   };
 
   const handleShow = async (category: Category) => {
     try {
       await updateCategory(category.slug || category.id, { is_active: true });
-      toast({ title: 'Visible again', description: `"${category.name}" is shown in the store.` });
+      toast({
+        title: t('categories.visibleTitle'),
+        description: t('categories.visibleBody', { name: category.name }),
+      });
       fetchCategories();
     } catch {
-      toast({ title: 'Error', description: 'Could not update the category.', variant: 'destructive' });
+      toast({
+        title: t('common.error'),
+        description: t('categories.updateFailed'),
+        variant: 'destructive',
+      });
     }
   };
 
@@ -118,18 +154,18 @@ const Categories = () => {
     <div className="space-y-6 p-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Categories</h1>
-          <p className="text-muted-foreground">
-            Categories group your products in the store (e.g. Whole Spices, Powders).
-          </p>
+          <h1 className="text-3xl font-bold tracking-tight">{t('categories.title')}</h1>
+          <p className="text-muted-foreground">{t('categories.subtitle')}</p>
         </div>
         <Button onClick={() => { resetForm(); setDialogOpen(true); }}>
-          <Plus className="mr-2 h-4 w-4" /> Add Category
+          <Plus className="mr-2 h-4 w-4" /> {t('categories.addButton')}
         </Button>
       </div>
 
+      <PageHelp>{t('categories.pageHelp')}</PageHelp>
+
       <Card>
-        <CardHeader><CardTitle>All Categories</CardTitle></CardHeader>
+        <CardHeader><CardTitle>{t('categories.allCategories')}</CardTitle></CardHeader>
         <CardContent
           className={`overflow-x-auto transition-opacity ${refreshing ? 'opacity-60' : 'opacity-100'}`}
         >
@@ -137,18 +173,18 @@ const Categories = () => {
           <Table className="min-w-[500px]">
             <TableHeader>
               <TableRow>
-                <TableHead>Image</TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Description</TableHead>
-                <TableHead>Visible?</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead>{t('common.image')}</TableHead>
+                <TableHead>{t('common.name')}</TableHead>
+                <TableHead>{t('common.description')}</TableHead>
+                <TableHead>{t('categories.colVisible')}</TableHead>
+                <TableHead className="text-right">{t('common.actions')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {categories.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={5} className="text-center text-muted-foreground py-8">
-                    No categories yet. Click "Add Category" to create your first one.
+                    {t('categories.empty')}
                   </TableCell>
                 </TableRow>
               )}
@@ -166,21 +202,21 @@ const Categories = () => {
                   </TableCell>
                   <TableCell>
                     {category.is_active !== false
-                      ? <span className="text-green-600 text-sm">Shown</span>
-                      : <span className="text-muted-foreground text-sm">Hidden</span>}
+                      ? <span className="text-green-600 text-sm">{t('categories.shown')}</span>
+                      : <span className="text-muted-foreground text-sm">{t('categories.hidden')}</span>}
                   </TableCell>
                   <TableCell className="text-right">
-                    <Button variant="ghost" size="icon" onClick={() => openEdit(category)} title="Edit">
+                    <Button variant="ghost" size="icon" onClick={() => openEdit(category)} title={t('common.edit')}>
                       <Edit className="h-4 w-4" />
                     </Button>
                     {category.is_active !== false ? (
                       <Button variant="ghost" size="icon" onClick={() => handleHide(category)}
-                        title="Hide from store">
+                        title={t('categories.hideTitle')}>
                         <EyeOff className="h-4 w-4 text-amber-600" />
                       </Button>
                     ) : (
                       <Button variant="ghost" size="icon" onClick={() => handleShow(category)}
-                        title="Show in store">
+                        title={t('categories.showTitle')}>
                         <Eye className="h-4 w-4 text-green-600" />
                       </Button>
                     )}
@@ -196,32 +232,32 @@ const Categories = () => {
       <Dialog open={dialogOpen} onOpenChange={(open) => { setDialogOpen(open); if (!open) resetForm(); }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{editing ? 'Edit Category' : 'Add Category'}</DialogTitle>
+            <DialogTitle>{editing ? t('categories.editTitle') : t('categories.addTitle')}</DialogTitle>
             <DialogDescription>
-              {editing ? 'Change the details and press Save.' : 'Give the category a name customers will understand.'}
+              {editing ? t('categories.editDescription') : t('categories.addDescription')}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <Label htmlFor="cat-name">Name *</Label>
+              <Label htmlFor="cat-name">{t('categories.nameLabel')}</Label>
               <Input
                 id="cat-name"
-                placeholder="e.g. Whole Spices"
+                placeholder={t('categories.namePlaceholder')}
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
               />
             </div>
             <div>
-              <Label htmlFor="cat-desc">Description (optional)</Label>
+              <Label htmlFor="cat-desc">{t('categories.descLabel')}</Label>
               <Textarea
                 id="cat-desc"
-                placeholder="A short line about what's in this category"
+                placeholder={t('categories.descPlaceholder')}
                 value={formData.description}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
               />
             </div>
             <div>
-              <Label htmlFor="cat-image">Photo (optional)</Label>
+              <Label htmlFor="cat-image">{t('categories.photoLabel')}</Label>
               <Input
                 id="cat-image"
                 type="file"
@@ -234,9 +270,9 @@ const Categories = () => {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setDialogOpen(false)}>{t('common.cancel')}</Button>
             <Button onClick={handleSubmit} disabled={saving}>
-              {saving ? 'Saving…' : editing ? 'Save changes' : 'Add category'}
+              {saving ? t('common.saving') : editing ? t('categories.saveChanges') : t('categories.addSubmit')}
             </Button>
           </DialogFooter>
         </DialogContent>

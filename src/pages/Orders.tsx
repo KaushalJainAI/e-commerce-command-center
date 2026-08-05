@@ -29,6 +29,8 @@ import { PageHelp } from '@/components/PageHelp';
 import { useAdminData, useInvalidate } from '@/hooks/useAdminData';
 import { useQueryClient } from '@tanstack/react-query';
 import { TableSkeleton } from '@/components/TableSkeleton';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 
 const PAGE_SIZE = 12; // must match backend REST_FRAMEWORK PAGE_SIZE
 
@@ -48,19 +50,28 @@ const istDateDaysAgo = (days: number) => {
 // Human-readable "how they paid" line from the Razorpay instrument fields.
 // Returns null when the webhook hasn't told us the method yet (payment still in
 // flight, or captured before instrument capture was introduced).
-const formatInstrument = (payment: OrderPayment): string | null => {
+const formatInstrument = (payment: OrderPayment, t: TFunction): string | null => {
   switch (payment.method) {
     case 'upi':
-      return payment.vpa ? `UPI — ${payment.vpa}` : 'UPI';
+      return payment.vpa
+        ? t('orders.instrument.upiWith', { vpa: payment.vpa })
+        : t('orders.instrument.upi');
     case 'card': {
+      // Network/type come from Razorpay as proper nouns (Visa, credit) and are
+      // left as sent — they are the card's own branding, not our copy.
       const parts = [payment.card_network, payment.card_type].filter(Boolean).join(' ');
       const masked = payment.card_last4 ? `•••• ${payment.card_last4}` : '';
-      return ['Card', masked, parts && `(${parts})`].filter(Boolean).join(' ');
+      return [t('orders.instrument.card'), masked, parts && `(${parts})`]
+        .filter(Boolean).join(' ');
     }
     case 'netbanking':
-      return payment.bank ? `Net Banking — ${payment.bank}` : 'Net Banking';
+      return payment.bank
+        ? t('orders.instrument.netbankingWith', { bank: payment.bank })
+        : t('orders.instrument.netbanking');
     case 'wallet':
-      return payment.wallet ? `Wallet — ${payment.wallet}` : 'Wallet';
+      return payment.wallet
+        ? t('orders.instrument.walletWith', { wallet: payment.wallet })
+        : t('orders.instrument.wallet');
     default:
       // Razorpay also sends emi / paylater / cardless_emi / bank_transfer / nach.
       // Present them readably rather than as raw snake_case.
@@ -70,6 +81,14 @@ const formatInstrument = (payment: OrderPayment): string | null => {
   }
 };
 
+/** Statuses the backend refuses to cancel — mirrors
+ *  `OrderViewSet.UNCANCELLABLE_STATUSES` in Backend/orders/views.py. Once a parcel
+ *  is out for delivery the cancel route is closed and the return has to be handled
+ *  as an RTO + refund, so the button must say so rather than fail on click. */
+const UNCANCELLABLE_STATUSES = new Set<string>([
+  'delivered', 'delivering', 'cancelled', 'refunded',
+]);
+
 const PAYMENT_STATUS_COLOR: Record<string, string> = {
   completed: 'bg-green-100 text-green-800',
   pending: 'bg-yellow-100 text-yellow-800',
@@ -78,6 +97,7 @@ const PAYMENT_STATUS_COLOR: Record<string, string> = {
 };
 
 const Orders = () => {
+  const { t } = useTranslation();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [viewingOrder, setViewingOrder] = useState<Order | null>(null);
@@ -203,13 +223,13 @@ const Orders = () => {
   const handleUpdateStatus = async (orderId: number, status: OrderStatus) => {
     try {
       const { data } = await updateOrder(orderId, { status });
-      toast({ title: 'Success', description: 'Order status updated' });
+      toast({ title: t('products.successTitle'), description: t('orders.statusUpdated') });
       setViewingOrder((prev) => (prev && prev.id === orderId ? { ...prev, status: data.status } : prev));
       invalidate(['orders'], ['dashboard'], ['products']);
     } catch (error) {
       toast({
-        title: 'Error',
-        description: 'Failed to update order',
+        title: t('common.error'),
+        description: t('orders.statusUpdateFailed'),
         variant: 'destructive',
       });
     }
@@ -225,24 +245,25 @@ const Orders = () => {
    */
   const handleCodPaid = async (order: Order, paid: boolean) => {
     const prompt = paid
-      ? `${order.order_number} — confirm you have received ₹${Number(order.total || 0).toFixed(2)} in cash?`
-      : `${order.order_number} — undo the cash confirmation? Use this only if it was ticked by mistake.`;
+      ? t('orders.codConfirmPrompt', {
+          orderNumber: order.order_number,
+          amount: Number(order.total || 0).toFixed(2),
+        })
+      : t('orders.codUndoPrompt', { orderNumber: order.order_number });
     if (!confirm(prompt)) return;
     setCodSaving(true);
     try {
       const { data } = await updateOrder(order.id, { cod_paid: paid });
       setViewingOrder((prev) => (prev && prev.id === order.id ? { ...prev, ...data } : prev));
       toast({
-        title: paid ? 'Cash confirmed' : 'Confirmation reversed',
-        description: paid
-          ? 'The order is marked paid and can now be refunded if needed.'
-          : 'The order is outstanding again.',
+        title: paid ? t('orders.cashConfirmedTitle') : t('orders.cashReversedTitle'),
+        description: paid ? t('orders.cashConfirmedBody') : t('orders.cashReversedBody'),
       });
       invalidate(['orders'], ['dashboard']);
     } catch (error: any) {
       toast({
-        title: 'Error',
-        description: error?.response?.data?.error || 'Failed to update COD payment',
+        title: t('common.error'),
+        description: error?.response?.data?.error || t('orders.codFailed'),
         variant: 'destructive',
       });
     } finally {
@@ -260,34 +281,31 @@ const Orders = () => {
     shipped: 'delivering',
     delivering: 'delivered',
   };
-  const NEXT_STEP_LABEL: Partial<Record<OrderStatus, string>> = {
-    confirmed: 'Confirm order',
-    processing: 'Start packing',
-    shipped: 'Mark as shipped',
-    delivering: 'Out for delivery',
-    delivered: 'Mark as delivered',
-  };
+  const nextStepLabel = (status: OrderStatus) =>
+    t(`orders.nextStep.${status}`, { defaultValue: status });
   // Keep these truthful about notifications: the backend deliberately does NOT
   // email the customer on a routine status change (orders/views.py `update`).
   // The only status-related mails are the tracking number ("your order shipped")
   // and cancellation — so never promise an email here.
-  const NEXT_STEP_SENTENCE: Partial<Record<OrderStatus, string>> = {
-    confirmed: 'confirm this order?',
-    processing: 'start packing this order?',
-    shipped: 'mark this order as shipped? The customer is emailed when you add a tracking number, not now.',
-    delivering: 'mark this order as out for delivery? You cannot cancel it after this step.',
-    delivered: 'mark this order as delivered? This completes the order.',
-  };
-
   const handleAdvanceStatus = async (order: Order) => {
     const next = NEXT_STATUS[order.status];
     if (!next) return;
-    if (!confirm(`${order.order_number} — do you want to ${NEXT_STEP_SENTENCE[next] || `move this order to "${next}"?`}`)) return;
+    const action = t(`orders.nextStepPrompt.${next}`, {
+      defaultValue: t('orders.genericAdvancePrompt', { status: next }),
+    });
+    if (!confirm(t('orders.advanceConfirm', {
+      orderNumber: order.order_number, action,
+    }))) return;
     await handleUpdateStatus(order.id, next);
   };
 
   // Click-to-WhatsApp: opens a chat with the customer, message pre-filled from
   // the order's current status. Pure link — no WhatsApp API involved.
+  //
+  // DELIBERATELY NOT TRANSLATED. This text is addressed to the CUSTOMER, whose
+  // language the panel knows nothing about; an admin reading the console in
+  // Hindi is not a reason to write to a shopper in it. Localise this only
+  // against the customer's own language preference, never the panel's.
   const waLink = (order: Order) => {
     const digits = (order.phone_number || '').replace(/\D/g, '');
     if (!digits) return null;
@@ -306,16 +324,17 @@ const Orders = () => {
   };
 
   const handleCancelOrder = async (id: number) => {
-    if (!confirm('Are you sure you want to cancel this order?')) return;
+    if (!confirm(t('orders.cancelConfirm'))) return;
     try {
       await cancelOrder(id);
-      toast({ title: 'Success', description: 'Order cancelled' });
+      toast({ title: t('products.successTitle'), description: t('orders.cancelled') });
       invalidate(['orders'], ['dashboard'], ['products']);
     } catch (error) {
       // The axios interceptor normalizes the backend message onto `error.message`.
       toast({
-        title: 'Error',
-        description: error instanceof Error && error.message ? error.message : 'Failed to cancel order',
+        title: t('common.error'),
+        description: error instanceof Error && error.message
+          ? error.message : t('orders.cancelFailed'),
         variant: 'destructive',
       });
     }
@@ -324,15 +343,16 @@ const Orders = () => {
   // Soft-delete: moves the order to the Recycle Bin (recoverable), rather than
   // destroying it. Distinct from Cancel, which restocks and notifies.
   const handleDeleteOrder = async (id: number) => {
-    if (!confirm('Move this order to the Recycle Bin? You can restore it later.')) return;
+    if (!confirm(t('orders.deleteConfirm'))) return;
     try {
       await deleteOrder(id);
-      toast({ title: 'Moved to Recycle Bin', description: 'The order can be restored from the Recycle Bin.' });
+      toast({ title: t('orders.movedToBinTitle'), description: t('orders.movedToBinBody') });
       invalidate(['orders'], ['dashboard'], ['products']);
     } catch (error) {
       toast({
-        title: 'Error',
-        description: error instanceof Error && error.message ? error.message : 'Failed to delete order',
+        title: t('common.error'),
+        description: error instanceof Error && error.message
+          ? error.message : t('orders.deleteFailed'),
         variant: 'destructive',
       });
     }
@@ -346,8 +366,9 @@ const Orders = () => {
       await downloadOrderInvoice(order.id, order.order_number);
     } catch (error) {
       toast({
-        title: 'Error',
-        description: error instanceof Error && error.message ? error.message : 'Failed to download bill',
+        title: t('common.error'),
+        description: error instanceof Error && error.message
+          ? error.message : t('orders.invoiceDownloadFailed'),
         variant: 'destructive',
       });
     } finally {
@@ -365,9 +386,9 @@ const Orders = () => {
       await downloadCreditNote(orderId, refundId, number);
     } catch (error) {
       toast({
-        title: 'Error',
+        title: t('common.error'),
         description: error instanceof Error && error.message
-          ? error.message : 'Failed to download credit note',
+          ? error.message : t('orders.creditNoteDownloadFailed'),
         variant: 'destructive',
       });
     }
@@ -389,7 +410,11 @@ const Orders = () => {
       if (filters.search?.trim()) params.search = filters.search.trim();
       await exportOrdersCsv(params);
     } catch {
-      toast({ title: 'Error', description: 'Failed to export orders', variant: 'destructive' });
+      toast({
+        title: t('common.error'),
+        description: t('orders.exportFailed'),
+        variant: 'destructive',
+      });
     } finally {
       setExporting(false);
     }
@@ -401,8 +426,9 @@ const Orders = () => {
       await downloadPackingSlip(order.id, order.order_number);
     } catch (error) {
       toast({
-        title: 'Error',
-        description: error instanceof Error && error.message ? error.message : 'Failed to download packing slip',
+        title: t('common.error'),
+        description: error instanceof Error && error.message
+          ? error.message : t('orders.packingSlipFailed'),
         variant: 'destructive',
       });
     } finally {
@@ -439,11 +465,12 @@ const Orders = () => {
       };
       setViewingOrder(updated);
       patchCachedOrder(updated);
-      toast({ title: 'Uploaded', description: 'Delivery bill saved.' });
+      toast({ title: t('orders.billUploadedTitle'), description: t('orders.billUploadedBody') });
     } catch (error) {
       toast({
-        title: 'Error',
-        description: error instanceof Error && error.message ? error.message : 'Failed to upload delivery bill',
+        title: t('common.error'),
+        description: error instanceof Error && error.message
+          ? error.message : t('orders.billUploadFailed'),
         variant: 'destructive',
       });
     } finally {
@@ -457,8 +484,9 @@ const Orders = () => {
       await viewDeliveryBill(order.id);
     } catch (error) {
       toast({
-        title: 'Error',
-        description: error instanceof Error && error.message ? error.message : 'Failed to open delivery bill',
+        title: t('common.error'),
+        description: error instanceof Error && error.message
+          ? error.message : t('orders.billOpenFailed'),
         variant: 'destructive',
       });
     }
@@ -466,7 +494,7 @@ const Orders = () => {
 
   const handleDeleteBill = async () => {
     if (!viewingOrder) return;
-    if (!confirm('Remove the uploaded delivery bill for this order?')) return;
+    if (!confirm(t('orders.billRemoveConfirm'))) return;
     try {
       await deleteDeliveryBill(viewingOrder.id);
       const updated: Order = {
@@ -476,11 +504,12 @@ const Orders = () => {
       };
       setViewingOrder(updated);
       patchCachedOrder(updated);
-      toast({ title: 'Removed', description: 'Delivery bill deleted.' });
+      toast({ title: t('orders.billRemovedTitle'), description: t('orders.billRemovedBody') });
     } catch (error) {
       toast({
-        title: 'Error',
-        description: error instanceof Error && error.message ? error.message : 'Failed to remove delivery bill',
+        title: t('common.error'),
+        description: error instanceof Error && error.message
+          ? error.message : t('orders.billRemoveFailed'),
         variant: 'destructive',
       });
     }
@@ -494,15 +523,15 @@ const Orders = () => {
       setSavingTracking(true);
       const { data } = await updateOrder(viewingOrder.id, { tracking_number: value });
       toast({
-        title: 'Success',
-        description: value ? 'Tracking number saved — customer notified' : 'Tracking number cleared',
+        title: t('products.successTitle'),
+        description: value ? t('orders.trackingSaved') : t('orders.trackingCleared'),
       });
       setViewingOrder(data);
       invalidate(['orders'], ['dashboard'], ['products']);
     } catch (error) {
       toast({
-        title: 'Error',
-        description: 'Failed to save tracking number',
+        title: t('common.error'),
+        description: t('orders.trackingSaveFailed'),
         variant: 'destructive',
       });
     } finally {
@@ -519,20 +548,24 @@ const Orders = () => {
     const raw = shippingCostInput.trim();
     const value = raw === '' ? 0 : Number(raw);
     if (!Number.isFinite(value) || value < 0) {
-      toast({ title: 'Error', description: 'Enter a valid amount', variant: 'destructive' });
+      toast({
+        title: t('common.error'),
+        description: t('orders.invalidAmount'),
+        variant: 'destructive',
+      });
       return;
     }
     if (value === Number(viewingOrder.shipping_cost ?? 0)) return;
     try {
       setSavingShippingCost(true);
       const { data } = await updateOrder(viewingOrder.id, { shipping_cost: value });
-      toast({ title: 'Saved', description: 'Courier cost recorded' });
+      toast({ title: t('common.saved'), description: t('orders.courierCostSaved') });
       setViewingOrder(data);
       invalidate(['orders'], ['dashboard']);
     } catch (error) {
       toast({
-        title: 'Error',
-        description: 'Failed to save courier cost',
+        title: t('common.error'),
+        description: t('orders.courierCostFailed'),
         variant: 'destructive',
       });
     } finally {
@@ -560,14 +593,14 @@ const Orders = () => {
     const typed = refundAmount.trim();
     const amount = typed === '' ? refundable : Number(typed);
     if (!Number.isFinite(amount) || amount <= 0) {
-      toast({ title: 'Invalid amount',
-              description: 'Enter an amount greater than zero, or leave it blank to refund the full balance.',
+      toast({ title: t('orders.invalidRefundTitle'),
+              description: t('orders.invalidRefundBody'),
               variant: 'destructive' });
       return;
     }
     if (amount > refundable + 0.005) {   // tolerance: 2dp input vs float math
-      toast({ title: 'Amount too large',
-              description: `Only ₹${refundable.toFixed(2)} is still refundable on this order.`,
+      toast({ title: t('orders.refundTooLargeTitle'),
+              description: t('orders.refundTooLargeBody', { amount: refundable.toFixed(2) }),
               variant: 'destructive' });
       return;
     }
@@ -580,10 +613,13 @@ const Orders = () => {
       });
       const partial = amount < refundable - 0.005;
       toast({
-        title: partial ? 'Partial refund recorded' : 'Refund recorded',
+        title: partial ? t('orders.partialRefundTitle') : t('orders.refundRecordedTitle'),
         description: partial
-          ? `₹${amount.toFixed(2)} returned — ₹${(refundable - amount).toFixed(2)} still outstanding. GST reversed pro rata.`
-          : `₹${amount.toFixed(2)} returned — GST reversed automatically`,
+          ? t('orders.partialRefundBody', {
+              amount: amount.toFixed(2),
+              outstanding: (refundable - amount).toFixed(2),
+            })
+          : t('orders.refundRecordedBody', { amount: amount.toFixed(2) }),
       });
       setViewingOrder(data);
       patchCachedOrder(data);
@@ -592,8 +628,8 @@ const Orders = () => {
       invalidate(['orders'], ['dashboard']);
     } catch (error) {
       toast({
-        title: 'Error',
-        description: 'Failed to record refund',
+        title: t('common.error'),
+        description: t('orders.refundFailed'),
         variant: 'destructive',
       });
     } finally {
@@ -624,20 +660,16 @@ const Orders = () => {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold">Orders</h1>
-        <p className="text-muted-foreground">Manage customer orders</p>
+        <h1 className="text-3xl font-bold">{t('orders.title')}</h1>
+        <p className="text-muted-foreground">{t('orders.subtitle')}</p>
       </div>
-      <PageHelp>
-        Every order is here. Use the green "Next step" button on each order to move
-        it forward (Confirm → Pack → Ship → Deliver). Tap an order to see its
-        items, print a packing slip, or message the customer on WhatsApp.
-      </PageHelp>
+      <PageHelp>{t('orders.pageHelp')}</PageHelp>
       <div className="flex flex-col sm:flex-row sm:items-center justify-end gap-4">
         <div className="flex flex-wrap items-center gap-2">
           {/* Typing does nothing on its own — Enter or the Search button runs it. */}
           <div className="relative">
             <Input
-              placeholder="Search order # / customer…"
+              placeholder={t('orders.searchPlaceholder')}
               className="w-56 pr-8"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
@@ -650,7 +682,7 @@ const Orders = () => {
               <button
                 type="button"
                 onClick={clearSearch}
-                title="Clear search"
+                title={t('orders.clearSearch')}
                 className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground"
               >
                 <X className="h-4 w-4" />
@@ -661,25 +693,25 @@ const Orders = () => {
             {refreshing
               ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               : <Search className="mr-2 h-4 w-4" />}
-            Search
+            {t('common.search')}
           </Button>
           {searchDirty && searchInput.trim() && (
-            <span className="text-xs text-muted-foreground">Press Enter to search</span>
+            <span className="text-xs text-muted-foreground">{t('orders.pressEnter')}</span>
           )}
           <Button variant="outline" onClick={openFilters}>
             <Filter className="mr-2 h-4 w-4" />
-            Filter & Sort
+            {t('orders.filterSort')}
           </Button>
           <Button variant="outline" onClick={handleExport} disabled={exporting}>
             <Download className="mr-2 h-4 w-4" />
-            {exporting ? 'Preparing…' : 'Export'}
+            {exporting ? t('orders.preparing') : t('common.export')}
           </Button>
         </div>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>All Orders ({totalCount})</CardTitle>
+          <CardTitle>{t('orders.allOrders', { count: totalCount })}</CardTitle>
         </CardHeader>
         <CardContent className="overflow-x-auto">
           {isInitialLoading ? (
@@ -693,21 +725,21 @@ const Orders = () => {
           >
             <TableHeader>
               <TableRow>
-                <TableHead>Order #</TableHead>
-                <TableHead>Customer</TableHead>
-                <TableHead>Items</TableHead>
-                <TableHead>Total</TableHead>
-                <TableHead>Payment</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Date</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead>{t('orders.colOrderNumber')}</TableHead>
+                <TableHead>{t('common.customer')}</TableHead>
+                <TableHead>{t('orders.colItems')}</TableHead>
+                <TableHead>{t('common.total')}</TableHead>
+                <TableHead>{t('orders.colPayment')}</TableHead>
+                <TableHead>{t('common.status')}</TableHead>
+                <TableHead>{t('common.date')}</TableHead>
+                <TableHead className="text-right">{t('common.actions')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {orders.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={8} className="text-center text-muted-foreground">
-                    No orders found
+                    {t('orders.empty')}
                   </TableCell>
                 </TableRow>
               ) : (
@@ -716,14 +748,14 @@ const Orders = () => {
                     <TableCell className="font-medium">{order.order_number}</TableCell>
                     <TableCell>
                       <div>
-                        <p className="font-medium">{order.customer_name || 'N/A'}</p>
+                        <p className="font-medium">{order.customer_name || t('orders.notAvailable')}</p>
                         <p className="text-xs text-muted-foreground">{order.customer_email}</p>
                       </div>
                     </TableCell>
-                    <TableCell>{order.items?.length || 0} items</TableCell>
+                    <TableCell>{t('orders.itemsCount', { count: order.items?.length || 0 })}</TableCell>
                     <TableCell className="font-medium">₹{parseFloat(String(order.total || 0)).toFixed(2)}</TableCell>
                     <TableCell className="capitalize">
-                      {order.payment_method || 'N/A'}
+                      {order.payment_method || t('orders.notAvailable')}
                       {/* A COD order's cash state is the thing this column was
                           silently missing: without it there is no way to see,
                           from the list, which parcels the courier still owes
@@ -733,14 +765,14 @@ const Orders = () => {
                           order.cod_paid_at
                             ? 'text-green-700 dark:text-green-400'
                             : 'text-amber-700 dark:text-amber-400'}`}>
-                          {order.cod_paid_at ? '✓ cash received' : 'cash pending'}
+                          {order.cod_paid_at ? t('orders.cashReceived') : t('orders.cashPending')}
                         </span>
                       )}
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-col items-start gap-1">
-                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize leading-5 ${getStatusBadgeColor(order.status)}`}>
-                          {order.status}
+                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium leading-5 ${getStatusBadgeColor(order.status)}`}>
+                          {t(`orderStatus.${order.status}`, { defaultValue: order.status })}
                         </span>
                         {/* A refund can be PARTIAL, so the badge alone is not the
                             whole story — ₹200 back on a ₹500 order would otherwise
@@ -748,9 +780,11 @@ const Orders = () => {
                             flag it when a balance is still outstanding. */}
                         {Number(order.refunded_amount ?? 0) > 0 && (
                           <span className="text-[11px] text-orange-700 dark:text-orange-400">
-                            ₹{Number(order.refunded_amount).toFixed(2)} refunded
+                            {t('orders.refundedAmount', {
+                              amount: Number(order.refunded_amount).toFixed(2),
+                            })}
                             {Number(order.refunded_amount) < Number(order.total ?? 0) - 0.005
-                              && ' (partial)'}
+                              && t('orders.partialSuffix')}
                           </span>
                         )}
                         {NEXT_STATUS[order.status] && (
@@ -760,14 +794,14 @@ const Orders = () => {
                             className="h-7 text-xs"
                             onClick={() => handleAdvanceStatus(order)}
                           >
-                            {NEXT_STEP_LABEL[NEXT_STATUS[order.status]!]} →
+                            {nextStepLabel(NEXT_STATUS[order.status]!)} →
                           </Button>
                         )}
                       </div>
                     </TableCell>
                     <TableCell>{new Date(order.created_at).toLocaleDateString()}</TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="icon" onClick={() => openViewDialog(order)} title="View order">
+                      <Button variant="ghost" size="icon" onClick={() => openViewDialog(order)} title={t('orders.viewOrder')}>
                         <Eye className="h-4 w-4" />
                       </Button>
                       {/* Disabled rather than hidden when no invoice has been
@@ -779,8 +813,8 @@ const Orders = () => {
                         onClick={() => handleDownloadInvoice(order)}
                         disabled={downloadingId === order.id || !order.invoice}
                         title={order.invoice
-                          ? `Download bill (tax invoice ${order.invoice.number})`
-                          : 'No invoice issued yet — raised once payment is confirmed, or at dispatch for COD'}
+                          ? t('orders.downloadBillTooltip', { number: order.invoice.number })
+                          : t('orders.noInvoiceTooltip')}
                       >
                         <FileDown className="h-4 w-4 text-primary" />
                       </Button>
@@ -788,8 +822,15 @@ const Orders = () => {
                         variant="ghost"
                         size="icon"
                         onClick={() => handleCancelOrder(order.id)}
-                        disabled={order.status === 'cancelled' || order.status === 'delivered'}
-                        title="Cancel order (restocks & notifies customer)"
+                        // Mirrors the backend's UNCANCELLABLE_STATUSES exactly.
+                        // Listing only cancelled/delivered left the button live on
+                        // a 'delivering' or 'refunded' order, where the click could
+                        // only ever come back a 400 — the reason it can't be
+                        // cancelled belongs in the tooltip, not in an error toast.
+                        disabled={UNCANCELLABLE_STATUSES.has(order.status)}
+                        title={UNCANCELLABLE_STATUSES.has(order.status)
+                          ? t('orders.cancelBlockedTooltip')
+                          : t('orders.cancelTooltip')}
                       >
                         <Ban className="h-4 w-4 text-amber-600" />
                       </Button>
@@ -797,7 +838,7 @@ const Orders = () => {
                         variant="ghost"
                         size="icon"
                         onClick={() => handleDeleteOrder(order.id)}
-                        title="Move to Recycle Bin"
+                        title={t('orders.recycleBinTooltip')}
                       >
                         <Trash2 className="h-4 w-4 text-destructive" />
                       </Button>
@@ -811,7 +852,7 @@ const Orders = () => {
           {/* Server-side pagination — filters/sort already applied in the DB */}
           <div className="flex items-center justify-between pt-4">
             <p className="text-sm text-muted-foreground">
-              Page {page} of {totalPages} • {totalCount} order{totalCount === 1 ? '' : 's'}
+              {t('orders.pager', { page, total: totalPages, count: totalCount })}
             </p>
             <div className="flex gap-2">
               <Button
@@ -820,7 +861,7 @@ const Orders = () => {
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={refreshing || page <= 1}
               >
-                Previous
+                {t('common.previous')}
               </Button>
               <Button
                 variant="outline"
@@ -828,7 +869,7 @@ const Orders = () => {
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                 disabled={refreshing || page >= totalPages}
               >
-                Next
+                {t('common.next')}
               </Button>
             </div>
           </div>
@@ -841,89 +882,89 @@ const Orders = () => {
       <Dialog open={filterOpen} onOpenChange={setFilterOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Filter & Sort Orders</DialogTitle>
+            <DialogTitle>{t('orders.filterTitle')}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-1.5">
-              <Label>Status</Label>
+              <Label>{t('common.status')}</Label>
               <Select
                 value={draftFilters.status || 'all'}
                 onValueChange={(value) => setDraftFilters({ ...draftFilters, status: (value === 'all' ? undefined : value as OrderStatus) })}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="All statuses" />
+                  <SelectValue placeholder={t('orders.allStatuses')} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All</SelectItem>
-                  <SelectItem value="pending">Pending</SelectItem>
-                  <SelectItem value="confirmed">Confirmed</SelectItem>
-                  <SelectItem value="processing">Processing</SelectItem>
-                  <SelectItem value="shipped">Shipped</SelectItem>
-                  <SelectItem value="delivering">Delivering</SelectItem>
-                  <SelectItem value="refunded">Refunded</SelectItem>
-                  <SelectItem value="delivered">Delivered</SelectItem>
-                  <SelectItem value="cancelled">Cancelled</SelectItem>
+                  <SelectItem value="all">{t('common.all')}</SelectItem>
+                  <SelectItem value="pending">{t('orderStatus.pending')}</SelectItem>
+                  <SelectItem value="confirmed">{t('orderStatus.confirmed')}</SelectItem>
+                  <SelectItem value="processing">{t('orderStatus.processing')}</SelectItem>
+                  <SelectItem value="shipped">{t('orderStatus.shipped')}</SelectItem>
+                  <SelectItem value="delivering">{t('orderStatus.delivering')}</SelectItem>
+                  <SelectItem value="refunded">{t('orderStatus.refunded')}</SelectItem>
+                  <SelectItem value="delivered">{t('orderStatus.delivered')}</SelectItem>
+                  <SelectItem value="cancelled">{t('orderStatus.cancelled')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>Payment Method</Label>
+              <Label>{t('orders.paymentMethod')}</Label>
               <Select
                 value={draftFilters.paymentMethod || 'all'}
                 onValueChange={(value) => setDraftFilters({ ...draftFilters, paymentMethod: (value === 'all' ? undefined : value as PaymentMethod) })}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="All methods" />
+                  <SelectValue placeholder={t('orders.allMethods')} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All</SelectItem>
-                  <SelectItem value="COD">COD</SelectItem>
-                  <SelectItem value="ONLINE">Online</SelectItem>
+                  <SelectItem value="all">{t('common.all')}</SelectItem>
+                  <SelectItem value="COD">{t('orders.cod')}</SelectItem>
+                  <SelectItem value="ONLINE">{t('orders.online')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>Sort By</Label>
+              <Label>{t('orders.sortBy')}</Label>
               <Select value={draftFilters.sortBy || 'default'} onValueChange={(value) => setDraftFilters({ ...draftFilters, sortBy: (value === 'default' ? undefined : value as any) })}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Select sorting" />
+                  <SelectValue placeholder={t('orders.selectSorting')} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="default">Default</SelectItem>
-                  <SelectItem value="newest">Newest First</SelectItem>
-                  <SelectItem value="oldest">Oldest First</SelectItem>
-                  <SelectItem value="highestTotal">Highest Total</SelectItem>
-                  <SelectItem value="lowestTotal">Lowest Total</SelectItem>
+                  <SelectItem value="default">{t('orders.sortDefault')}</SelectItem>
+                  <SelectItem value="newest">{t('orders.sortNewest')}</SelectItem>
+                  <SelectItem value="oldest">{t('orders.sortOldest')}</SelectItem>
+                  <SelectItem value="highestTotal">{t('orders.sortHighest')}</SelectItem>
+                  <SelectItem value="lowestTotal">{t('orders.sortLowest')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>Order Date</Label>
+              <Label>{t('orders.orderDate')}</Label>
               <div className="flex flex-wrap gap-2 mt-1 mb-2">
                 {([
-                  { label: 'Today', days: 0 },
-                  { label: 'Last 7 days', days: 6 },
-                  { label: 'Last 30 days', days: 29 },
-                ] as const).map(({ label, days }) => {
+                  { key: 'orders.today', days: 0 },
+                  { key: 'orders.last7', days: 6 },
+                  { key: 'orders.last30', days: 29 },
+                ] as const).map(({ key, days }) => {
                   const to = IST_TODAY();
                   const from = istDateDaysAgo(days);
                   const active = draftFilters.dateFrom === from && draftFilters.dateTo === to;
                   return (
                     <Button
-                      key={label}
+                      key={key}
                       type="button"
                       size="sm"
                       variant={active ? 'default' : 'outline'}
                       onClick={() => setDraftFilters({ ...draftFilters, dateFrom: from, dateTo: to })}
                     >
-                      {label}
+                      {t(key)}
                     </Button>
                   );
                 })}
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <Label className="text-xs text-muted-foreground">From</Label>
+                  <Label className="text-xs text-muted-foreground">{t('orders.from')}</Label>
                   <Input
                     type="date"
                     value={draftFilters.dateFrom || ''}
@@ -931,7 +972,7 @@ const Orders = () => {
                   />
                 </div>
                 <div>
-                  <Label className="text-xs text-muted-foreground">To</Label>
+                  <Label className="text-xs text-muted-foreground">{t('orders.to')}</Label>
                   <Input
                     type="date"
                     value={draftFilters.dateTo || ''}
@@ -942,7 +983,7 @@ const Orders = () => {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <Label>Min Amount</Label>
+                <Label>{t('orders.minAmount')}</Label>
                 <Input
                   type="number"
                   placeholder="₹0"
@@ -951,10 +992,10 @@ const Orders = () => {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label>Max Amount</Label>
+                <Label>{t('orders.maxAmount')}</Label>
                 <Input
                   type="number"
-                  placeholder="No limit"
+                  placeholder={t('orders.noLimit')}
                   value={draftFilters.maxAmount || ''}
                   onChange={(e) => setDraftFilters({ ...draftFilters, maxAmount: parseFloat(e.target.value) || undefined })}
                 />
@@ -963,9 +1004,9 @@ const Orders = () => {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={clearDraftFilters}>
-              Clear Filters
+              {t('common.clearFilters')}
             </Button>
-            <Button onClick={applyDraftFilters}>Apply</Button>
+            <Button onClick={applyDraftFilters}>{t('common.apply')}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -974,16 +1015,16 @@ const Orders = () => {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="w-[95vw] max-w-lg sm:max-w-xl md:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Order Details</DialogTitle>
+            <DialogTitle>{t('orders.detailsTitle')}</DialogTitle>
             <DialogDescription>
-              {viewingOrder?.order_number} • {new Date(viewingOrder?.created_at || '').toLocaleDateString('en-IN', { 
-                day: 'numeric', 
-                month: 'short', 
-                year: 'numeric' 
-              })} at {new Date(viewingOrder?.created_at || '').toLocaleTimeString('en-IN', { 
-                hour: '2-digit', 
-                minute: '2-digit',
-                hour12: true 
+              {t('orders.detailsSubtitle', {
+                orderNumber: viewingOrder?.order_number ?? '',
+                date: new Date(viewingOrder?.created_at || '').toLocaleDateString('en-IN', {
+                  day: 'numeric', month: 'short', year: 'numeric',
+                }),
+                time: new Date(viewingOrder?.created_at || '').toLocaleTimeString('en-IN', {
+                  hour: '2-digit', minute: '2-digit', hour12: true,
+                }),
               })}
             </DialogDescription>
           </DialogHeader>
@@ -991,14 +1032,14 @@ const Orders = () => {
             <div className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <Label className="block mb-1 text-muted-foreground">Status</Label>
-                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize leading-5 ${getStatusBadgeColor(viewingOrder.status)}`}>
-                    {viewingOrder.status}
+                  <Label className="block mb-1 text-muted-foreground">{t('common.status')}</Label>
+                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium leading-5 ${getStatusBadgeColor(viewingOrder.status)}`}>
+                    {t(`orderStatus.${viewingOrder.status}`, { defaultValue: viewingOrder.status })}
                   </span>
                 </div>
                 <div>
-                  <Label className="block mb-1 text-muted-foreground">Payment Method</Label>
-                  <p className="font-medium">{viewingOrder.payment_method || 'N/A'}</p>
+                  <Label className="block mb-1 text-muted-foreground">{t('orders.paymentMethod')}</Label>
+                  <p className="font-medium">{viewingOrder.payment_method || t('orders.notAvailable')}</p>
                 </div>
               </div>
 
@@ -1021,12 +1062,15 @@ const Orders = () => {
                       onChange={(e) => handleCodPaid(viewingOrder, e.target.checked)}
                     />
                     <span>
-                      <span className="font-medium">Paid in cash</span>
+                      <span className="font-medium">{t('orders.paidInCash')}</span>
                       <span className="block text-xs text-muted-foreground">
                         {viewingOrder.cod_paid_at
-                          ? `Confirmed ${new Date(viewingOrder.cod_paid_at).toLocaleString()}`
-                          : `₹${Number(viewingOrder.total || 0).toFixed(2)} still to collect. `
-                            + 'Tick once the money is in hand.'}
+                          ? t('orders.codConfirmedAt', {
+                              when: new Date(viewingOrder.cod_paid_at).toLocaleString(),
+                            })
+                          : t('orders.codOutstanding', {
+                              amount: Number(viewingOrder.total || 0).toFixed(2),
+                            })}
                       </span>
                     </span>
                   </label>
@@ -1038,34 +1082,36 @@ const Orders = () => {
               {viewingOrder.payment && (
                 <div className="rounded-md border p-3 space-y-2">
                   <div className="flex items-center justify-between gap-2">
-                    <Label className="text-muted-foreground">Payment Details</Label>
+                    <Label className="text-muted-foreground">{t('orders.paymentDetails')}</Label>
                     <span
-                      className={`px-2 py-1 rounded text-xs capitalize ${
+                      className={`px-2 py-1 rounded text-xs ${
                         PAYMENT_STATUS_COLOR[viewingOrder.payment.status] ||
                         'bg-gray-100 text-gray-800'
                       }`}
                     >
-                      {viewingOrder.payment.status}
+                      {t(`paymentStatus.${viewingOrder.payment.status}`, {
+                        defaultValue: viewingOrder.payment.status,
+                      })}
                     </span>
                   </div>
 
-                  {formatInstrument(viewingOrder.payment) && (
+                  {formatInstrument(viewingOrder.payment, t) && (
                     <div>
                       {/* "Paid via" would be a lie on a failed/pending payment —
                           the customer only attempted that method. */}
                       <span className="text-xs text-muted-foreground">
                         {viewingOrder.payment.status === 'completed' ||
                         viewingOrder.payment.status === 'refunded'
-                          ? 'Paid via'
-                          : 'Attempted via'}
+                          ? t('orders.paidVia')
+                          : t('orders.attemptedVia')}
                       </span>
-                      <p className="font-medium">{formatInstrument(viewingOrder.payment)}</p>
+                      <p className="font-medium">{formatInstrument(viewingOrder.payment, t)}</p>
                     </div>
                   )}
 
                   {viewingOrder.payment.razorpay_payment_id && (
                     <div>
-                      <span className="text-xs text-muted-foreground">Transaction ID</span>
+                      <span className="text-xs text-muted-foreground">{t('orders.transactionId')}</span>
                       <p className="font-mono text-sm break-all">
                         {viewingOrder.payment.razorpay_payment_id}
                       </p>
@@ -1078,17 +1124,17 @@ const Orders = () => {
                   {Number(viewingOrder.payment.gateway_fee || 0) > 0 && (
                     <div className="text-xs space-y-0.5 border-t pt-2">
                       <div className="flex justify-between">
-                        <span className="text-muted-foreground">Gateway fee</span>
+                        <span className="text-muted-foreground">{t('orders.gatewayFee')}</span>
                         <span>−₹{Number(viewingOrder.payment.gateway_fee).toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-muted-foreground">of which GST (credit)</span>
+                        <span className="text-muted-foreground">{t('orders.gatewayFeeGst')}</span>
                         <span className="text-green-600">
                           ₹{Number(viewingOrder.payment.gateway_tax || 0).toFixed(2)}
                         </span>
                       </div>
                       <div className="flex justify-between font-medium">
-                        <span>Net settlement</span>
+                        <span>{t('orders.netSettlement')}</span>
                         <span>₹{Number(viewingOrder.payment.net_settlement || 0).toFixed(2)}</span>
                       </div>
                     </div>
@@ -1097,7 +1143,7 @@ const Orders = () => {
                   {viewingOrder.payment.status === 'failed' &&
                     viewingOrder.payment.failure_reason && (
                       <div>
-                        <span className="text-xs text-muted-foreground">Failure reason</span>
+                        <span className="text-xs text-muted-foreground">{t('orders.failureReason')}</span>
                         <p className="text-sm text-red-700">
                           {viewingOrder.payment.failure_reason}
                         </p>
@@ -1115,14 +1161,14 @@ const Orders = () => {
               <div className="flex flex-wrap gap-2">
                 {NEXT_STATUS[viewingOrder.status] && (
                   <Button onClick={() => handleAdvanceStatus(viewingOrder)}>
-                    {NEXT_STEP_LABEL[NEXT_STATUS[viewingOrder.status]!]} →
+                    {nextStepLabel(NEXT_STATUS[viewingOrder.status]!)} →
                   </Button>
                 )}
                 {waLink(viewingOrder) && (
                   <Button asChild variant="outline" className="text-green-700 border-green-300">
                     <a href={waLink(viewingOrder)!} target="_blank" rel="noreferrer">
                       <MessageCircle className="mr-2 h-4 w-4" />
-                      WhatsApp customer
+                      {t('orders.whatsappCustomer')}
                     </a>
                   </Button>
                 )}
@@ -1132,14 +1178,16 @@ const Orders = () => {
                   disabled={downloadingSlipId === viewingOrder.id}
                 >
                   <Printer className="mr-2 h-4 w-4" />
-                  {downloadingSlipId === viewingOrder.id ? 'Preparing…' : 'Packing slip'}
+                  {downloadingSlipId === viewingOrder.id
+                    ? t('orders.preparing')
+                    : t('orders.packingSlip')}
                 </Button>
               </div>
 
               {/* Rare corrections only — hidden so the everyday flow stays one button. */}
               <details className="rounded-md border p-3">
                 <summary className="cursor-pointer text-sm text-muted-foreground">
-                  Advanced: set status manually
+                  {t('orders.advancedStatus')}
                 </summary>
                 <div className="mt-2 max-w-xs">
                   <Select
@@ -1150,38 +1198,36 @@ const Orders = () => {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="pending">Pending</SelectItem>
-                      <SelectItem value="confirmed">Confirmed</SelectItem>
-                      <SelectItem value="processing">Processing</SelectItem>
-                      <SelectItem value="shipped">Shipped</SelectItem>
-                      <SelectItem value="delivering">Delivering</SelectItem>
-                      <SelectItem value="refunded">Refunded</SelectItem>
-                      <SelectItem value="delivered">Delivered</SelectItem>
+                      <SelectItem value="pending">{t('orderStatus.pending')}</SelectItem>
+                      <SelectItem value="confirmed">{t('orderStatus.confirmed')}</SelectItem>
+                      <SelectItem value="processing">{t('orderStatus.processing')}</SelectItem>
+                      <SelectItem value="shipped">{t('orderStatus.shipped')}</SelectItem>
+                      <SelectItem value="delivering">{t('orderStatus.delivering')}</SelectItem>
+                      <SelectItem value="refunded">{t('orderStatus.refunded')}</SelectItem>
+                      <SelectItem value="delivered">{t('orderStatus.delivered')}</SelectItem>
                     </SelectContent>
                   </Select>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Use only to correct a mistake. To cancel, use the cancel button in the list.
-                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">{t('orders.advancedHint')}</p>
                 </div>
               </details>
 
               <div>
-                <Label className="text-muted-foreground">Shipping Address</Label>
+                <Label className="text-muted-foreground">{t('orders.shippingAddress')}</Label>
                 <p className="font-medium">{viewingOrder.shipping_address}</p>
               </div>
               
               {viewingOrder.phone_number && (
                 <div>
-                  <Label className="text-muted-foreground">Phone Number</Label>
+                  <Label className="text-muted-foreground">{t('orders.phoneNumber')}</Label>
                   <p className="font-medium">{viewingOrder.phone_number}</p>
                 </div>
               )}
 
               <div>
-                <Label className="text-muted-foreground">Tracking Number</Label>
+                <Label className="text-muted-foreground">{t('orders.trackingNumber')}</Label>
                 <div className="flex gap-2 mt-1">
                   <Input
-                    placeholder="Enter courier tracking number"
+                    placeholder={t('orders.trackingPlaceholder')}
                     value={trackingInput}
                     onChange={(e) => setTrackingInput(e.target.value)}
                   />
@@ -1189,17 +1235,15 @@ const Orders = () => {
                     onClick={handleSaveTracking}
                     disabled={savingTracking || trackingInput.trim() === (viewingOrder.tracking_number || '')}
                   >
-                    {savingTracking ? 'Saving...' : 'Save'}
+                    {savingTracking ? t('common.saving') : t('common.save')}
                   </Button>
                 </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Saving a tracking number emails the customer that their order has shipped.
-                </p>
+                <p className="text-xs text-muted-foreground mt-1">{t('orders.trackingHint')}</p>
               </div>
 
               {/* Delivery bill — admin-only. Stored privately; never shown to the customer. */}
               <div>
-                <Label className="text-muted-foreground">Delivery Bill (admin only)</Label>
+                <Label className="text-muted-foreground">{t('orders.deliveryBill')}</Label>
                 <input
                   ref={billInputRef}
                   type="file"
@@ -1215,7 +1259,7 @@ const Orders = () => {
                     <>
                       <Button variant="outline" size="sm" onClick={() => handleViewBill(viewingOrder)}>
                         <Receipt className="mr-2 h-4 w-4" />
-                        View Bill
+                        {t('orders.viewBill')}
                       </Button>
                       <Button
                         variant="outline"
@@ -1224,11 +1268,11 @@ const Orders = () => {
                         disabled={uploadingBill}
                       >
                         <Upload className="mr-2 h-4 w-4" />
-                        {uploadingBill ? 'Uploading…' : 'Replace'}
+                        {uploadingBill ? t('orders.uploading') : t('orders.replace')}
                       </Button>
                       <Button variant="outline" size="sm" onClick={handleDeleteBill} className="text-destructive">
                         <Trash2 className="mr-2 h-4 w-4" />
-                        Remove
+                        {t('orders.remove')}
                       </Button>
                     </>
                   ) : (
@@ -1239,26 +1283,30 @@ const Orders = () => {
                       disabled={uploadingBill}
                     >
                       <Upload className="mr-2 h-4 w-4" />
-                      {uploadingBill ? 'Uploading…' : 'Upload Bill'}
+                      {uploadingBill ? t('orders.uploading') : t('orders.uploadBill')}
                     </Button>
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">
                   {viewingOrder.has_delivery_bill && viewingOrder.delivery_bill_uploaded_at
-                    ? `Uploaded ${new Date(viewingOrder.delivery_bill_uploaded_at).toLocaleString('en-IN')}. `
+                    ? t('orders.billUploadedAt', {
+                        when: new Date(viewingOrder.delivery_bill_uploaded_at).toLocaleString('en-IN'),
+                      })
                     : ''}
-                  PDF, JPG, PNG or WebP (max 10 MB). Only visible to admins.
+                  {t('orders.billFormats')}
                 </p>
               </div>
 
               <div>
-                <Label className="text-muted-foreground">Order Items</Label>
+                <Label className="text-muted-foreground">{t('orders.orderItems')}</Label>
                 <div className="mt-2 border rounded-lg divide-y">
                   {viewingOrder.items?.map((item) => (
                     <div key={item.id} className="p-3 flex justify-between">
                       <div>
                         <p className="font-medium">{item.product_name}</p>
-                        <p className="text-sm text-muted-foreground">Qty: {item.quantity}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {t('orders.itemQty', { count: item.quantity })}
+                        </p>
                       </div>
                       <p className="font-medium">₹{parseFloat(String(item.total || 0)).toFixed(2)}</p>
                     </div>
@@ -1268,12 +1316,12 @@ const Orders = () => {
 
               <div className="border-t pt-4 space-y-2">
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Subtotal</span>
+                  <span className="text-muted-foreground">{t('common.subtotal')}</span>
                   <span>₹{parseFloat(String(viewingOrder.subtotal || 0)).toFixed(2)}</span>
                 </div>
                 {viewingOrder.discount > 0 && (
                   <div className="flex justify-between text-green-600">
-                    <span>Discount</span>
+                    <span>{t('orders.discount')}</span>
                     <span>-₹{parseFloat(String(viewingOrder.discount || 0)).toFixed(2)}</span>
                   </div>
                 )}
@@ -1282,26 +1330,28 @@ const Orders = () => {
                     inside the subtotal and is disclosed below the total instead. */}
                 {viewingOrder.tax_inclusive === false && (
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Tax</span>
+                    <span className="text-muted-foreground">{t('orders.tax')}</span>
                     <span>₹{parseFloat(String(viewingOrder.tax || 0)).toFixed(2)}</span>
                   </div>
                 )}
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Delivery</span>
+                  <span className="text-muted-foreground">{t('orders.delivery')}</span>
                   <span>
                     {parseFloat(String(viewingOrder.shipping_charge || 0)) === 0
-                      ? "FREE"
+                      ? t('orders.free')
                       : `₹${parseFloat(String(viewingOrder.shipping_charge)).toFixed(2)}`}
                   </span>
                 </div>
                 <div className="flex justify-between font-bold text-lg border-t pt-2">
-                  <span>Total</span>
+                  <span>{t('common.total')}</span>
                   <span>₹{parseFloat(String(viewingOrder.total || 0)).toFixed(2)}</span>
                 </div>
                 {viewingOrder.tax_inclusive !== false && (
                   <>
                     <p className="text-xs text-muted-foreground text-right">
-                      Incl. GST ₹{parseFloat(String(viewingOrder.tax || 0)).toFixed(2)}
+                      {t('orders.inclGst', {
+                        amount: parseFloat(String(viewingOrder.tax || 0)).toFixed(2),
+                      })}
                     </p>
                     {/* Per-slab GST, the same breakup the customer's bill shows. */}
                     {(viewingOrder.tax_breakdown ?? []).length > 0 && (
@@ -1312,10 +1362,10 @@ const Orders = () => {
                             className="flex justify-between text-xs text-muted-foreground"
                           >
                             <span>
-                              {slab.rate == null ? 'GST' : `GST ${slab.rate}%`}
+                              {slab.rate == null ? 'GST' : t('orders.gstSlab', { rate: slab.rate })}
                               {slab.taxable_value != null && (
                                 <span className="opacity-70">
-                                  {' '}on ₹{slab.taxable_value.toFixed(2)}
+                                  {t('orders.gstOn', { amount: slab.taxable_value.toFixed(2) })}
                                 </span>
                               )}
                             </span>
@@ -1333,7 +1383,7 @@ const Orders = () => {
                 {viewingOrder.place_of_supply && (
                   <div className="mt-2 border-t pt-2 space-y-0.5">
                     <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>Place of supply</span>
+                      <span>{t('orders.placeOfSupply')}</span>
                       <span>
                         {viewingOrder.place_of_supply.name}
                         {viewingOrder.place_of_supply.code && (
@@ -1368,10 +1418,10 @@ const Orders = () => {
                   <div className="flex items-center justify-between gap-2">
                     <div className="min-w-0">
                       <Label htmlFor="shipping-cost" className="text-xs">
-                        Courier cost (what you paid)
+                        {t('orders.courierCost')}
                       </Label>
                       <p className="text-[11px] text-muted-foreground">
-                        Internal only — leave blank if not recorded.
+                        {t('orders.courierCostHint')}
                       </p>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
@@ -1395,7 +1445,7 @@ const Orders = () => {
                             Number(viewingOrder.shipping_cost ?? 0)
                         }
                       >
-                        {savingShippingCost ? '…' : 'Save'}
+                        {savingShippingCost ? '…' : t('common.save')}
                       </Button>
                     </div>
                   </div>
@@ -1404,11 +1454,11 @@ const Orders = () => {
                   {Number(viewingOrder.refunded_amount ?? 0) > 0 && (
                     <div className="rounded-md bg-orange-50 dark:bg-orange-950/20 p-2 space-y-0.5">
                       <div className="flex justify-between text-xs font-medium">
-                        <span>Refunded</span>
+                        <span>{t('orders.refunded')}</span>
                         <span>₹{Number(viewingOrder.refunded_amount).toFixed(2)}</span>
                       </div>
                       <div className="flex justify-between text-xs text-muted-foreground">
-                        <span>GST reversed</span>
+                        <span>{t('orders.gstReversed')}</span>
                         <span>₹{Number(viewingOrder.refunded_tax ?? 0).toFixed(2)}</span>
                       </div>
                       {/* Each instalment with its credit note serial, which is
@@ -1421,9 +1471,9 @@ const Orders = () => {
                             onClick={() => handleDownloadCreditNote(
                               viewingOrder.id, r.id, r.credit_note_number)}
                             className="underline underline-offset-2 hover:text-foreground"
-                            title="Download GST credit note (PDF)"
+                            title={t('orders.creditNoteTooltip')}
                           >
-                            {r.credit_note_number ?? 'Credit note'}
+                            {r.credit_note_number ?? t('orders.creditNote')}
                           </button>
                           <span>
                             {new Date(r.created_at).toLocaleDateString()} · ₹{Number(r.amount).toFixed(2)}
@@ -1435,12 +1485,10 @@ const Orders = () => {
                   {Number(viewingOrder.refunded_amount ?? 0) < Number(viewingOrder.total ?? 0) && (
                     <div className="space-y-1">
                       <Label htmlFor="refund-amount" className="text-xs">
-                        Record a refund
+                        {t('orders.recordRefund')}
                       </Label>
                       <p className="text-[11px] text-muted-foreground">
-                        Record money you have already returned — Razorpay refunds are
-                        NOT recorded automatically. GST is reversed for you.
-                        Leave the amount blank to refund the full balance.
+                        {t('orders.recordRefundHint')}
                       </p>
                       <div className="flex items-center gap-1">
                         {/* An explicit amount field: a partial refund is allowed,
@@ -1461,7 +1509,7 @@ const Orders = () => {
                         <Input
                           id="refund-note"
                           className="h-8 flex-1"
-                          placeholder="Reason (optional)"
+                          placeholder={t('orders.refundReasonPlaceholder')}
                           value={refundNote}
                           onChange={e => setRefundNote(e.target.value)}
                         />
@@ -1473,18 +1521,21 @@ const Orders = () => {
                         >
                           {savingRefund
                             ? '…'
-                            : `Refund ₹${(refundAmount.trim() === ''
-                                ? refundableOnViewing
-                                : Number(refundAmount) || 0
-                              ).toFixed(2)}`}
+                            : t('orders.refundButton', {
+                                amount: (refundAmount.trim() === ''
+                                  ? refundableOnViewing
+                                  : Number(refundAmount) || 0
+                                ).toFixed(2),
+                              })}
                         </Button>
                       </div>
                       {refundAmount.trim() !== '' &&
                        Number(refundAmount) > 0 &&
                        Number(refundAmount) < refundableOnViewing - 0.005 && (
                         <p className="text-[11px] text-orange-600 dark:text-orange-400">
-                          Partial — ₹{(refundableOnViewing - Number(refundAmount)).toFixed(2)} will
-                          remain outstanding. The order is still marked “Refunded”.
+                          {t('orders.partialWarning', {
+                            amount: (refundableOnViewing - Number(refundAmount)).toFixed(2),
+                          })}
                         </p>
                       )}
                     </div>
@@ -1492,7 +1543,7 @@ const Orders = () => {
 
                   {Number(viewingOrder.shipping_cost ?? 0) > 0 && (
                     <div className="flex justify-between text-xs">
-                      <span className="text-muted-foreground">Delivery margin</span>
+                      <span className="text-muted-foreground">{t('orders.deliveryMargin')}</span>
                       <span
                         className={
                           Number(viewingOrder.shipping_charge ?? 0) -
@@ -1521,15 +1572,17 @@ const Orders = () => {
                 onClick={() => handleDownloadInvoice(viewingOrder)}
                 disabled={downloadingId === viewingOrder.id || !viewingOrder.invoice}
                 title={viewingOrder.invoice
-                  ? `Tax invoice ${viewingOrder.invoice.number}`
-                  : 'No invoice issued yet — raised once payment is confirmed, or at dispatch for COD'}
+                  ? t('orders.invoiceTooltip', { number: viewingOrder.invoice.number })
+                  : t('orders.noInvoiceTooltip')}
               >
                 <FileDown className="mr-2 h-4 w-4" />
-                {downloadingId === viewingOrder.id ? 'Downloading…' : 'Download Bill'}
+                {downloadingId === viewingOrder.id
+                  ? t('orders.downloading')
+                  : t('orders.downloadBill')}
               </Button>
             )}
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
-              Close
+              {t('common.close')}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -3,10 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { globalSearch, GlobalSearchResults } from '@/api/adminSearch';
 import { Input } from '@/components/ui/input';
 import { Search, ShoppingCart, Package, User, Ticket, Loader2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 /** One search box for the whole panel: type an order number, customer name or
  *  phone, product, or coupon code — click a result to jump to it. */
 export const GlobalSearch = () => {
+  const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<GlobalSearchResults | null>(null);
   const [open, setOpen] = useState(false);
@@ -139,7 +141,7 @@ export const GlobalSearch = () => {
           : <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />}
         <Input
           ref={inputRef}
-          placeholder="Search orders, products, customers…  (Ctrl+K)"
+          placeholder={t('search.placeholder')}
           className="pl-8 h-9"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -152,11 +154,11 @@ export const GlobalSearch = () => {
         <div className="absolute left-0 right-0 top-11 z-50 max-h-[70vh] overflow-y-auto rounded-md border bg-popover shadow-lg">
           {isEmpty && (
             <p className="px-3 py-4 text-sm text-muted-foreground text-center">
-              Nothing found for “{query.trim()}”.
+              {t('search.empty', { query: query.trim() })}
             </p>
           )}
           {results.orders.length > 0 && (
-            <Section title="Orders">
+            <Section title={t('search.orders')}>
               {results.orders.map(o => (
                 <Row
                   key={`o-${o.id}`}
@@ -170,21 +172,21 @@ export const GlobalSearch = () => {
             </Section>
           )}
           {results.products.length > 0 && (
-            <Section title="Products">
+            <Section title={t('search.products')}>
               {results.products.map(p => (
                 <Row
                   key={`p-${p.id}`}
                   rowKey={`p-${p.id}`}
                   icon={Package}
                   main={p.name}
-                  sub={`₹${p.price} · ${p.stock} in stock`}
+                  sub={`₹${p.price} · ${t('search.inStock', { count: p.stock })}`}
                   onClick={() => go(`/products?search=${encodeURIComponent(p.name)}`)}
                 />
               ))}
             </Section>
           )}
           {results.customers.length > 0 && (
-            <Section title="Customers">
+            <Section title={t('search.customers')}>
               {results.customers.map(c => (
                 <Row
                   key={`c-${c.id}`}
@@ -198,14 +200,14 @@ export const GlobalSearch = () => {
             </Section>
           )}
           {results.coupons.length > 0 && (
-            <Section title="Coupons">
+            <Section title={t('search.coupons')}>
               {results.coupons.map(c => (
                 <Row
                   key={`cp-${c.id}`}
                   rowKey={`cp-${c.id}`}
                   icon={Ticket}
                   main={c.code}
-                  sub={c.is_active ? 'active' : 'inactive'}
+                  sub={c.is_active ? t('common.active') : t('common.inactive')}
                   onClick={() => go('/coupons')}
                 />
               ))}

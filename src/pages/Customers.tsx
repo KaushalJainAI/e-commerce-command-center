@@ -16,6 +16,8 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAdminData } from '@/hooks/useAdminData';
 import { TableSkeleton } from '@/components/TableSkeleton';
+import { PageHelp } from '@/components/PageHelp';
+import { useTranslation } from 'react-i18next';
 
 const PAGE_SIZE = 12; // matches backend REST_FRAMEWORK PAGE_SIZE
 
@@ -31,6 +33,7 @@ const waLink = (phone: string | null) => {
 };
 
 const Customers = () => {
+  const { t } = useTranslation();
   const { id } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -99,7 +102,7 @@ const Customers = () => {
     return (
       <div className="space-y-6 p-6">
         <Button variant="ghost" onClick={() => navigate('/customers')}>
-          <ArrowLeft className="mr-2 h-4 w-4" /> All customers
+          <ArrowLeft className="mr-2 h-4 w-4" /> {t('customers.allCustomers')}
         </Button>
 
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
@@ -113,13 +116,13 @@ const Customers = () => {
               {detail.address && (
                 <p className="flex items-center gap-2"><MapPin className="h-4 w-4" /> {detail.address}</p>
               )}
-              <p>Customer since {formatDate(detail.created_at)}</p>
+              <p>{t('customers.customerSince', { date: formatDate(detail.created_at) })}</p>
             </div>
           </div>
           {wa && (
             <Button asChild className="bg-green-600 hover:bg-green-700">
               <a href={wa} target="_blank" rel="noreferrer">
-                <MessageCircle className="mr-2 h-4 w-4" /> WhatsApp
+                <MessageCircle className="mr-2 h-4 w-4" /> {t('customers.whatsapp')}
               </a>
             </Button>
           )}
@@ -127,29 +130,29 @@ const Customers = () => {
 
         <div className="grid gap-4 grid-cols-2">
           <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Orders placed</CardTitle></CardHeader>
+            <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">{t('customers.ordersPlaced')}</CardTitle></CardHeader>
             <CardContent><div className="text-3xl font-bold">{detail.order_count}</div></CardContent>
           </Card>
           <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Total spent</CardTitle></CardHeader>
+            <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">{t('customers.totalSpent')}</CardTitle></CardHeader>
             <CardContent><div className="text-3xl font-bold">₹{Number(detail.total_spent).toLocaleString('en-IN')}</div></CardContent>
           </Card>
         </div>
 
         <Card>
-          <CardHeader><CardTitle>Order history</CardTitle></CardHeader>
+          <CardHeader><CardTitle>{t('customers.orderHistory')}</CardTitle></CardHeader>
           <CardContent className="overflow-x-auto">
             {detail.orders.length === 0 ? (
-              <p className="text-center text-muted-foreground py-6">No orders yet.</p>
+              <p className="text-center text-muted-foreground py-6">{t('customers.noOrders')}</p>
             ) : (
               <Table className="min-w-[500px]">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Order</TableHead>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Payment</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Total</TableHead>
+                    <TableHead>{t('customers.colOrder')}</TableHead>
+                    <TableHead>{t('common.date')}</TableHead>
+                    <TableHead>{t('orders.colPayment')}</TableHead>
+                    <TableHead>{t('common.status')}</TableHead>
+                    <TableHead className="text-right">{t('common.total')}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -162,7 +165,9 @@ const Customers = () => {
                       <TableCell className="font-medium">{o.order_number}</TableCell>
                       <TableCell>{formatDate(o.created_at)}</TableCell>
                       <TableCell>{o.payment_method || '—'}</TableCell>
-                      <TableCell className="capitalize">{o.status}</TableCell>
+                      <TableCell>
+                        {t(`orderStatus.${o.status}`, { defaultValue: o.status })}
+                      </TableCell>
                       <TableCell className="text-right font-mono">₹{o.total_amount}</TableCell>
                     </TableRow>
                   ))}
@@ -180,15 +185,15 @@ const Customers = () => {
     <div className="space-y-6 p-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Customers</h1>
-          <p className="text-muted-foreground">
-            Find a customer by name, phone, or email to see their orders.
-          </p>
+          <h1 className="text-3xl font-bold tracking-tight">{t('customers.title')}</h1>
+          <p className="text-muted-foreground">{t('customers.subtitle')}</p>
         </div>
         <Button variant="outline" onClick={() => exportCustomersCsv()}>
-          <Download className="mr-2 h-4 w-4" /> Export to Excel
+          <Download className="mr-2 h-4 w-4" /> {t('customers.exportButton')}
         </Button>
       </div>
+
+      <PageHelp>{t('customers.pageHelp')}</PageHelp>
 
       <Card>
         <CardHeader>
@@ -197,7 +202,7 @@ const Customers = () => {
             <div className="relative flex-1">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Search name, phone, or email…"
+                placeholder={t('customers.searchPlaceholder')}
                 className="pl-8 pr-8"
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
@@ -210,7 +215,7 @@ const Customers = () => {
                 <button
                   type="button"
                   onClick={clearSearch}
-                  title="Clear search"
+                  title={t('customers.clearSearch')}
                   className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground"
                 >
                   <X className="h-4 w-4" />
@@ -221,11 +226,11 @@ const Customers = () => {
               {refreshing
                 ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 : <Search className="mr-2 h-4 w-4" />}
-              Search
+              {t('common.search')}
             </Button>
           </div>
           {appliedSearch !== searchInput.trim() && searchInput.trim() && (
-            <p className="text-xs text-muted-foreground pt-1">Press Enter to search</p>
+            <p className="text-xs text-muted-foreground pt-1">{t('customers.pressEnter')}</p>
           )}
         </CardHeader>
         <CardContent
@@ -235,7 +240,7 @@ const Customers = () => {
             <TableSkeleton rows={6} columns={5} />
           ) : customers.length === 0 ? (
             <p className="text-center text-muted-foreground py-8">
-              {appliedSearch ? 'No customers match your search.' : 'No customers yet.'}
+              {appliedSearch ? t('customers.noMatch') : t('customers.empty')}
             </p>
           ) : isMobile ? (
             // Mobile: stacked cards instead of a wide horizontally-scrolling table.
@@ -250,7 +255,8 @@ const Customers = () => {
                     <p className="font-medium truncate">{c.name}</p>
                     <p className="text-xs text-muted-foreground truncate">{c.phone || c.email}</p>
                     <p className="text-xs text-muted-foreground">
-                      {c.order_count} order{c.order_count === 1 ? '' : 's'} · ₹{Number(c.total_spent).toLocaleString('en-IN')}
+                      {t('customers.ordersCount', { count: c.order_count })}
+                      {' · '}₹{Number(c.total_spent).toLocaleString('en-IN')}
                     </p>
                   </div>
                   <ChevronRight className="h-5 w-5 flex-shrink-0 text-muted-foreground" />
@@ -261,11 +267,11 @@ const Customers = () => {
             <Table className="min-w-[600px]">
               <TableHeader>
                 <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Contact</TableHead>
-                  <TableHead>Location</TableHead>
-                  <TableHead>Orders</TableHead>
-                  <TableHead className="text-right">Total spent</TableHead>
+                  <TableHead>{t('common.name')}</TableHead>
+                  <TableHead>{t('customers.colContact')}</TableHead>
+                  <TableHead>{t('customers.colLocation')}</TableHead>
+                  <TableHead>{t('customers.colOrders')}</TableHead>
+                  <TableHead className="text-right">{t('customers.colTotalSpent')}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -294,14 +300,14 @@ const Customers = () => {
           {totalPages > 1 && (
             <div className="flex items-center justify-between pt-4">
               <p className="text-sm text-muted-foreground">
-                Page {page} of {totalPages} ({totalCount} customers)
+                {t('customers.pager', { page, total: totalPages, count: totalCount })}
               </p>
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
-                  Previous
+                  {t('common.previous')}
                 </Button>
                 <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
-                  Next
+                  {t('common.next')}
                 </Button>
               </div>
             </div>

@@ -17,20 +17,23 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 
 type FilterTab = 'all' | 'needs_human' | 'resolved';
 
-const relativeTime = (iso: string) => {
+const relativeTime = (iso: string, t: TFunction) => {
   const diff = Date.now() - new Date(iso).getTime();
   const m = Math.floor(diff / 60000);
-  if (m < 1) return 'just now';
-  if (m < 60) return `${m}m ago`;
+  if (m < 1) return t('conversations.justNow');
+  if (m < 60) return t('conversations.minutesAgo', { count: m });
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
+  if (h < 24) return t('conversations.hoursAgo', { count: h });
+  return t('conversations.daysAgo', { count: Math.floor(h / 24) });
 };
 
 const Conversations = () => {
+  const { t } = useTranslation();
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [selected, setSelected] = useState<ConversationSummary | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -49,7 +52,7 @@ const Conversations = () => {
       const data = await getConversations(params);
       setConversations(data);
     } catch {
-      toast({ title: 'Failed to load conversations', variant: 'destructive' });
+      toast({ title: t('conversations.loadFailed'), variant: 'destructive' });
     } finally {
       setLoading(false);
     }
@@ -61,7 +64,7 @@ const Conversations = () => {
       setMessages(data);
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
     } catch {
-      toast({ title: 'Failed to load messages', variant: 'destructive' });
+      toast({ title: t('conversations.messagesFailed'), variant: 'destructive' });
     }
   };
 
@@ -95,7 +98,7 @@ const Conversations = () => {
       await fetchMessages(selected.conversation_id);
       await fetchConversations();
     } catch {
-      toast({ title: 'Failed to send message', variant: 'destructive' });
+      toast({ title: t('conversations.sendFailed'), variant: 'destructive' });
     } finally {
       setSending(false);
     }
@@ -107,18 +110,23 @@ const Conversations = () => {
       await patchConversation(selected.conversation_id, { status: 'resolved' });
       setSelected((prev) => prev ? { ...prev, status: 'resolved' } : prev);
       await fetchConversations();
-      toast({ title: 'Conversation resolved' });
+      toast({ title: t('conversations.resolvedToast') });
     } catch {
-      toast({ title: 'Failed to resolve', variant: 'destructive' });
+      toast({ title: t('conversations.resolveFailed'), variant: 'destructive' });
     }
   };
 
   const needsHumanCount = conversations.filter((c) => c.needs_human).length;
 
   const FILTER_TABS: { key: FilterTab; label: string }[] = [
-    { key: 'all', label: 'All' },
-    { key: 'needs_human', label: `Needs Attention${needsHumanCount ? ` (${needsHumanCount})` : ''}` },
-    { key: 'resolved', label: 'Resolved' },
+    { key: 'all', label: t('conversations.tabAll') },
+    {
+      key: 'needs_human',
+      label: needsHumanCount
+        ? t('conversations.tabNeedsHumanCount', { count: needsHumanCount })
+        : t('conversations.tabNeedsHuman'),
+    },
+    { key: 'resolved', label: t('conversations.tabResolved') },
   ];
 
   return (
@@ -147,7 +155,7 @@ const Conversations = () => {
         {/* Refresh */}
         <div className="flex items-center justify-between px-3 py-2 border-b shrink-0">
           <span className="text-xs text-muted-foreground">
-            {conversations.length} conversation{conversations.length !== 1 ? 's' : ''}
+            {t('conversations.count', { count: conversations.length })}
           </span>
           <Button variant="ghost" size="icon" className="h-6 w-6" onClick={fetchConversations}>
             <RefreshCw className="h-3.5 w-3.5" />
@@ -157,11 +165,11 @@ const Conversations = () => {
         {/* Thread list */}
         <ScrollArea className="flex-1">
           {loading && (
-            <p className="text-center text-muted-foreground text-sm mt-8">Loading…</p>
+            <p className="text-center text-muted-foreground text-sm mt-8">{t('common.loading')}</p>
           )}
           {!loading && conversations.length === 0 && (
             <p className="text-center text-muted-foreground text-sm mt-8 px-4">
-              No conversations.
+              {t('conversations.none')}
             </p>
           )}
           {conversations.map((conv) => (
@@ -175,16 +183,16 @@ const Conversations = () => {
             >
               <div className="flex items-start justify-between gap-1.5">
                 <span className="text-sm font-medium truncate flex-1 leading-tight">
-                  {conv.title || 'New conversation'}
+                  {conv.title || t('conversations.newConversation')}
                 </span>
                 <div className="flex items-center gap-1 shrink-0 mt-0.5">
                   {conv.needs_human && (
-                    <span className="h-2 w-2 rounded-full bg-orange-500" title="Needs attention" />
+                    <span className="h-2 w-2 rounded-full bg-orange-500" title={t('conversations.needsAttention')} />
                   )}
                   {conv.status === 'resolved' && (
-                    <span className="h-2 w-2 rounded-full bg-green-500" title="Resolved" />
+                    <span className="h-2 w-2 rounded-full bg-green-500" title={t('conversations.resolved')} />
                   )}
-                  <span className="text-[10px] text-muted-foreground">{relativeTime(conv.updated_at)}</span>
+                  <span className="text-[10px] text-muted-foreground">{relativeTime(conv.updated_at, t)}</span>
                 </div>
               </div>
               {conv.user_email && (
@@ -202,7 +210,7 @@ const Conversations = () => {
       {!selected ? (
         <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-3">
           <MessageSquare className="h-10 w-10 opacity-30" />
-          <p className="text-sm">Select a conversation to view</p>
+          <p className="text-sm">{t('conversations.selectPrompt')}</p>
         </div>
       ) : (
         <div className="flex-1 flex flex-col overflow-hidden">
@@ -211,31 +219,34 @@ const Conversations = () => {
           <div className="px-5 py-3 border-b flex items-center justify-between shrink-0 bg-card">
             <div>
               <p className="font-semibold text-sm">
-                {selected.title || 'New conversation'}
+                {selected.title || t('conversations.newConversation')}
               </p>
               <p className="text-xs text-muted-foreground">
-                {selected.user_email || 'Guest'} · started {format(new Date(selected.created_at), 'dd MMM yyyy, HH:mm')}
+                {t('conversations.startedAt', {
+                  who: selected.user_email || t('conversations.guest'),
+                  when: format(new Date(selected.created_at), 'dd MMM yyyy, HH:mm'),
+                })}
               </p>
             </div>
             <div className="flex items-center gap-2">
               {selected.needs_human && (
                 <Badge variant="outline" className="text-orange-600 border-orange-300 text-xs">
-                  Needs attention
+                  {t('conversations.needsAttention')}
                 </Badge>
               )}
               <Badge
                 variant="outline"
                 className={cn(
-                  'text-xs capitalize',
+                  'text-xs',
                   selected.status === 'resolved' ? 'border-green-300 text-green-600' : ''
                 )}
               >
-                {selected.status}
+                {t(`conversations.status.${selected.status}`, { defaultValue: selected.status })}
               </Badge>
               {selected.status !== 'resolved' && (
                 <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={handleResolve}>
                   <CheckCircle className="h-3.5 w-3.5" />
-                  Resolve
+                  {t('conversations.resolve')}
                 </Button>
               )}
             </div>
@@ -266,7 +277,7 @@ const Conversations = () => {
                     <div className={cn('max-w-[70%] space-y-1', isUser && 'items-end flex flex-col')}>
                       {isAdmin && msg.sender_name && (
                         <p className="text-[11px] text-orange-600 font-medium">
-                          {msg.sender_name} — Nidhi Team
+                          {t('conversations.teamSuffix', { name: msg.sender_name })}
                         </p>
                       )}
                       <div className={cn(
@@ -298,7 +309,7 @@ const Conversations = () => {
             <Input
               value={replyText}
               onChange={(e) => setReplyText(e.target.value)}
-              placeholder="Reply as admin…"
+              placeholder={t('conversations.replyPlaceholder')}
               className="flex-1"
               disabled={selected.status === 'resolved'}
             />

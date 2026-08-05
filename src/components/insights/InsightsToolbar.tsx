@@ -12,6 +12,7 @@ import {
 import { CalendarIcon, RefreshCw } from 'lucide-react';
 import type { Granularity } from '@/api/analytics';
 import { useDateRange } from '@/hooks/useDateRange';
+import { useTranslation } from 'react-i18next';
 
 interface Props {
   controls: ReturnType<typeof useDateRange>;
@@ -26,6 +27,7 @@ const PRESETS = [
 ];
 
 export const InsightsToolbar = ({ controls, onRefresh, refreshing }: Props) => {
+  const { t } = useTranslation();
   const { from, to, granularity, compare, update, setPreset } = controls;
   const [open, setOpen] = useState(false);
 
@@ -67,20 +69,20 @@ export const InsightsToolbar = ({ controls, onRefresh, refreshing }: Props) => {
       <Select value={granularity} onValueChange={(v) => update({ gran: v as Granularity })}>
         <SelectTrigger className="w-28 h-9"><SelectValue /></SelectTrigger>
         <SelectContent>
-          <SelectItem value="day">Daily</SelectItem>
-          <SelectItem value="week">Weekly</SelectItem>
-          <SelectItem value="month">Monthly</SelectItem>
+          <SelectItem value="day">{t('insights.toolbar.daily')}</SelectItem>
+          <SelectItem value="week">{t('insights.toolbar.weekly')}</SelectItem>
+          <SelectItem value="month">{t('insights.toolbar.monthly')}</SelectItem>
         </SelectContent>
       </Select>
 
       <div className="flex items-center gap-2">
         <Switch id="compare" checked={compare} onCheckedChange={(v) => update({ compare: v })} />
-        <Label htmlFor="compare" className="text-sm font-normal">Compare</Label>
+        <Label htmlFor="compare" className="text-sm font-normal">{t('insights.toolbar.compare')}</Label>
       </div>
 
       <Button variant="outline" size="sm" onClick={onRefresh} disabled={refreshing} className="gap-2">
         <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-        Refresh
+        {t('insights.toolbar.refresh')}
       </Button>
     </div>
   );

@@ -15,9 +15,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { Plus, Edit, ToggleLeft, ToggleRight, X } from 'lucide-react';
+import { PageHelp } from '@/components/PageHelp';
+import { useTranslation } from 'react-i18next';
 
 
 const Combos = () => {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const invalidate = useInvalidate();
   const {
@@ -112,8 +115,8 @@ const Combos = () => {
     const validItems = formData.items.filter((i) => i.product !== '');
     if (validItems.length === 0) {
       toast({
-        title: 'Validation error',
-        description: 'Please add at least one product to the combo',
+        title: t('combos.validationTitle'),
+        description: t('combos.needOneProduct'),
         variant: 'destructive',
       });
       return;
@@ -129,8 +132,8 @@ const Combos = () => {
     const sellingPrice = parseNumberOrZero(formData.discount_price);
     if (formData.discount_price && sellingPrice > computedMrp) {
       toast({
-        title: 'Validation error',
-        description: `Selling price cannot exceed the MRP of ₹${computedMrp.toFixed(2)}.`,
+        title: t('combos.validationTitle'),
+        description: t('combos.priceAboveMrp', { mrp: computedMrp.toFixed(2) }),
         variant: 'destructive',
       });
       return;
@@ -147,11 +150,11 @@ const Combos = () => {
       if (editingCombo) {
         await updateCombo(editingCombo.slug, form);
         comboSlug = editingCombo.slug;
-        toast({ title: 'Success', description: 'Combo updated successfully' });
+        toast({ title: t('combos.successTitle'), description: t('combos.updatedBody') });
       } else {
         const created = await createCombo(form);
         comboSlug = created.slug;
-        toast({ title: 'Success', description: 'Combo created successfully' });
+        toast({ title: t('combos.successTitle'), description: t('combos.createdBody') });
       }
 
       // Replace homepage-section placements (separate JSON PATCH so an empty
@@ -165,8 +168,8 @@ const Combos = () => {
     } catch (error: any) {
       console.error('Submit error:', error);
       toast({
-        title: 'Error',
-        description: error.message || 'Failed to save combo',
+        title: t('common.error'),
+        description: error.message || t('combos.saveFailed'),
         variant: 'destructive',
       });
     } finally {
@@ -184,8 +187,8 @@ const handleToggleStatus = async (combo: Combo) => {
     await updateCombo(combo.slug, { is_active: newStatus });
     
     toast({
-      title: 'Success',
-      description: `Combo marked as ${newStatus ? 'active' : 'inactive'}`,
+      title: t('combos.successTitle'),
+      description: newStatus ? t('combos.markedActive') : t('combos.markedInactive'),
     });
     
     if (editingCombo && editingCombo.id === combo.id) {
@@ -198,8 +201,8 @@ const handleToggleStatus = async (combo: Combo) => {
     setComboActive(combo.id, !newStatus);
 
     toast({
-      title: 'Error',
-      description: 'Failed to update combo status',
+      title: t('common.error'),
+      description: t('combos.statusFailed'),
       variant: 'destructive',
     });
   }
@@ -278,8 +281,8 @@ const handleToggleStatus = async (combo: Combo) => {
     } catch (error) {
       console.error('Failed to load combo:', error);
       toast({
-        title: 'Error',
-        description: 'Failed to load combo details',
+        title: t('common.error'),
+        description: t('combos.loadDetailsFailed'),
         variant: 'destructive',
       });
       setEditingCombo(null);
@@ -341,17 +344,19 @@ const handleToggleStatus = async (combo: Combo) => {
     <div className="space-y-6 p-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Combos</h1>
-          <p className="text-muted-foreground">Manage product combinations</p>
+          <h1 className="text-3xl font-bold tracking-tight">{t('combos.title')}</h1>
+          <p className="text-muted-foreground">{t('combos.subtitle')}</p>
         </div>
         <Button onClick={() => { resetForm(); setDialogOpen(true); }}>
-          <Plus className="mr-2 h-4 w-4" /> Add Combo
+          <Plus className="mr-2 h-4 w-4" /> {t('combos.addButton')}
         </Button>
       </div>
 
+      <PageHelp>{t('combos.pageHelp')}</PageHelp>
+
       <Card>
         <CardHeader>
-          <CardTitle>All Combos</CardTitle>
+          <CardTitle>{t('combos.allCombos')}</CardTitle>
         </CardHeader>
         <CardContent
           className={`overflow-x-auto transition-opacity ${refreshing ? 'opacity-60' : 'opacity-100'}`}
@@ -361,14 +366,14 @@ const handleToggleStatus = async (combo: Combo) => {
           <Table className="min-w-[600px]">
             <TableHeader>
               <TableRow>
-                <TableHead>Image</TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Products</TableHead>
-                <TableHead>Price</TableHead>
-                <TableHead>Discounted Price</TableHead>
-                <TableHead>Weight</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead>{t('common.image')}</TableHead>
+                <TableHead>{t('common.name')}</TableHead>
+                <TableHead>{t('combos.colProducts')}</TableHead>
+                <TableHead>{t('common.price')}</TableHead>
+                <TableHead>{t('combos.colDiscountedPrice')}</TableHead>
+                <TableHead>{t('combos.colWeight')}</TableHead>
+                <TableHead>{t('common.status')}</TableHead>
+                <TableHead className="text-right">{t('common.actions')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -387,7 +392,7 @@ const handleToggleStatus = async (combo: Combo) => {
                       )}
                     </TableCell>
                     <TableCell className="font-medium">{combo.name}</TableCell>
-                    <TableCell>{combo.items?.length || 0} products</TableCell>
+                    <TableCell>{t('combos.productsCount', { count: combo.items?.length || 0 })}</TableCell>
                     <TableCell className="font-mono">
                       {price !== null ? `₹${price}` : '—'}
                     </TableCell>
@@ -405,7 +410,7 @@ const handleToggleStatus = async (combo: Combo) => {
                             : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
                         }`
                       }>
-                        {combo.is_active ? 'Active' : 'Inactive'}
+                        {combo.is_active ? t('common.active') : t('common.inactive')}
                       </span>
                     </TableCell>
                     <TableCell className="text-right space-x-1">
@@ -413,7 +418,7 @@ const handleToggleStatus = async (combo: Combo) => {
                         variant="ghost" 
                         size="icon" 
                         onClick={() => openEditDialog(combo)} 
-                        title="Edit combo"
+                        title={t('combos.editTooltip')}
                       >
                         <Edit className="h-4 w-4" />
                       </Button>
@@ -421,7 +426,9 @@ const handleToggleStatus = async (combo: Combo) => {
                         variant="ghost"
                         size="icon"
                         onClick={() => handleToggleStatus(combo)}
-                        title={combo.is_active ? 'Deactivate combo' : 'Activate combo'}
+                        title={combo.is_active
+                          ? t('combos.deactivateTooltip')
+                          : t('combos.activateTooltip')}
                         className={
                           combo.is_active
                             ? 'hover:bg-green-500/10 text-green-600 hover:text-green-700'
@@ -440,7 +447,7 @@ const handleToggleStatus = async (combo: Combo) => {
           </Table>
           {combos.length === 0 && (
             <div className="text-center py-12">
-              <p className="text-muted-foreground">No combos found.</p>
+              <p className="text-muted-foreground">{t('combos.noneFound')}</p>
             </div>
           )}
           </>
@@ -457,9 +464,9 @@ const handleToggleStatus = async (combo: Combo) => {
       >
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editingCombo ? 'Edit Combo' : 'Add New Combo'}</DialogTitle>
+            <DialogTitle>{editingCombo ? t('combos.editTitle') : t('combos.addTitle')}</DialogTitle>
             <DialogDescription>
-              {editingCombo ? 'Update combo information' : 'Create a new combo'}
+              {editingCombo ? t('combos.editDescription') : t('combos.addDescription')}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -468,11 +475,13 @@ const handleToggleStatus = async (combo: Combo) => {
                 {imagePreview ? (
                   <img src={imagePreview} alt="Combo" className="h-full w-full object-cover" />
                 ) : (
-                  <span className="text-xs text-muted-foreground text-center px-2">No image</span>
+                  <span className="text-xs text-muted-foreground text-center px-2">
+                    {t('combos.noImage')}
+                  </span>
                 )}
               </div>
               <div className="space-y-1">
-                <Label htmlFor="image">Combo image</Label>
+                <Label htmlFor="image">{t('combos.comboImage')}</Label>
                 <Input
                   id="image"
                   type="file"
@@ -480,48 +489,48 @@ const handleToggleStatus = async (combo: Combo) => {
                   onChange={handleImageChange}
                   className="cursor-pointer"
                 />
-                <p className="text-xs text-muted-foreground">Upload a clear combo image.</p>
+                <p className="text-xs text-muted-foreground">{t('combos.imageHint')}</p>
               </div>
             </div>
             
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="name">Name *</Label>
+                <Label htmlFor="name">{t('combos.nameLabel')}</Label>
                 <Input
                   id="name"
                   value={formData.name}
                   onChange={e => setFormData({ ...formData, name: e.target.value })}
                   required
-                  placeholder="Combo name"
+                  placeholder={t('combos.namePlaceholder')}
                 />
               </div>
 
               <div>
-                <Label htmlFor="slug">Slug</Label>
+                <Label htmlFor="slug">{t('combos.slugLabel')}</Label>
                 <Input
                   id="slug"
                   value={formData.slug}
                   onChange={e => setFormData({ ...formData, slug: e.target.value })}
-                  placeholder="combo-slug"
+                  placeholder={t('combos.slugPlaceholder')}
                   disabled={!!editingCombo}
                 />
               </div>
             </div>
             
             <div>
-              <Label htmlFor="description">Description</Label>
+              <Label htmlFor="description">{t('combos.descriptionLabel')}</Label>
               <Textarea
                 id="description"
                 value={formData.description}
                 onChange={e => setFormData({ ...formData, description: e.target.value })}
-                placeholder="Combo description"
+                placeholder={t('combos.descriptionPlaceholder')}
                 rows={3}
               />
             </div>
             
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="mrp">MRP (from components)</Label>
+                <Label htmlFor="mrp">{t('combos.mrpLabel')}</Label>
                 <Input
                   id="mrp"
                   value={`₹${computedMrp.toFixed(2)}`}
@@ -529,12 +538,10 @@ const handleToggleStatus = async (combo: Combo) => {
                   disabled
                   className="bg-muted font-mono"
                 />
-                <p className="text-xs text-muted-foreground mt-1">
-                  Sum of the component sizes below. To change it, change the components.
-                </p>
+                <p className="text-xs text-muted-foreground mt-1">{t('combos.mrpHint')}</p>
               </div>
               <div>
-                <Label htmlFor="discount_price">Selling Price *</Label>
+                <Label htmlFor="discount_price">{t('combos.sellingPriceLabel')}</Label>
                 <Input
                   id="discount_price"
                   type="number"
@@ -544,15 +551,13 @@ const handleToggleStatus = async (combo: Combo) => {
                   onChange={e => setFormData({ ...formData, discount_price: e.target.value })}
                   placeholder="0.00"
                 />
-                <p className="text-xs text-muted-foreground mt-1">
-                  What the bundle actually sells for. Leave blank to sell at MRP.
-                </p>
+                <p className="text-xs text-muted-foreground mt-1">{t('combos.sellingPriceHint')}</p>
               </div>
             </div>
 
             <div className="flex flex-col sm:flex-row gap-2">
               <div className="flex-1">
-                <Label htmlFor="weight">Weight</Label>
+                <Label htmlFor="weight">{t('combos.weightLabel')}</Label>
                 <Input
                   id="weight"
                   type="number"
@@ -560,18 +565,18 @@ const handleToggleStatus = async (combo: Combo) => {
                   min="0"
                   value={formData.weight}
                   onChange={e => setFormData({ ...formData, weight: e.target.value })}
-                  placeholder="e.g. 500 (number only)"
+                  placeholder={t('combos.weightPlaceholder')}
                 />
-                <p className="text-xs text-muted-foreground mt-1">Please enter numbers only.</p>
+                <p className="text-xs text-muted-foreground mt-1">{t('combos.weightHint')}</p>
               </div>
               <div className="w-24">
-                <Label htmlFor="unit">Unit</Label>
+                <Label htmlFor="unit">{t('combos.unitLabel')}</Label>
                 <Select
                   value={formData.unit}
                   onValueChange={value => setFormData({ ...formData, unit: value })}
                 >
                   <SelectTrigger id="unit">
-                    <SelectValue placeholder="Unit" />
+                    <SelectValue placeholder={t('combos.unitLabel')} />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="g">g</SelectItem>
@@ -588,7 +593,7 @@ const handleToggleStatus = async (combo: Combo) => {
             </div>
 
             <div>
-              <Label htmlFor="low_stock_threshold">Low-stock alert level</Label>
+              <Label htmlFor="low_stock_threshold">{t('combos.lowStockLabel')}</Label>
               <Input
                 id="low_stock_threshold"
                 type="number"
@@ -596,22 +601,21 @@ const handleToggleStatus = async (combo: Combo) => {
                 step="1"
                 value={formData.low_stock_threshold}
                 onChange={e => setFormData({ ...formData, low_stock_threshold: e.target.value })}
-                placeholder="e.g. 5"
+                placeholder={t('combos.lowStockPlaceholder')}
               />
               <p className="text-xs text-muted-foreground mt-1">
-                Email the admin when the number of combos that can still be built
-                (limited by the scarcest product in it) drops to this or below.
+                {t('combos.lowStockHint')}
                 {editingCombo?.available_stock !== undefined && (
-                  <> Currently {editingCombo.available_stock} can be built.</>
+                  <>{t('combos.lowStockCurrent', { count: editingCombo.available_stock })}</>
                 )}
               </p>
             </div>
 
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <Label>Products in Combo *</Label>
+                <Label>{t('combos.productsInCombo')}</Label>
                 <Button type="button" variant="outline" size="sm" onClick={addProductToCombo}>
-                  <Plus className="h-4 w-4 mr-1" /> Add Product
+                  <Plus className="h-4 w-4 mr-1" /> {t('combos.addProduct')}
                 </Button>
               </div>
               
@@ -628,7 +632,10 @@ const handleToggleStatus = async (combo: Combo) => {
                       <div className="flex-1 space-y-3 w-full">
                         <div>
                           <Label htmlFor={`product-${index}`}>
-                            Product {isProductMissing && <span className="text-red-600">(Not Available)</span>}
+                            {t('combos.productLabel')}{' '}
+                            {isProductMissing && (
+                              <span className="text-red-600">{t('combos.notAvailable')}</span>
+                            )}
                           </Label>
                           <Select
                             value={item.product === '' ? '' : item.product}
@@ -636,22 +643,20 @@ const handleToggleStatus = async (combo: Combo) => {
                           >
                             <SelectTrigger id={`product-${index}`} className={isProductMissing ? 'border-red-500' : ''}>
                               <SelectValue placeholder={isProductMissing
-                                ? `Product ID: ${item.product} (Not Found)`
-                                : "Select product"} />
+                                ? t('combos.productNotFound', { id: item.product })
+                                : t('combos.selectProduct')} />
                             </SelectTrigger>
                             <SelectContent>
                               {allProducts.map(product => (
                                 <SelectItem key={product.id} value={String(product.id)}>
                                   {product.name} {product.weight ? `- ${product.weight}` : ''}
-                                  {!product.is_active && ' (Inactive)'}
+                                  {!product.is_active && t('combos.inactiveSuffix')}
                                 </SelectItem>
                               ))}
                             </SelectContent>
                           </Select>
                           {isProductMissing && (
-                            <p className="text-xs text-red-600 mt-1">
-                              This product no longer exists. Please select a different product or remove this item.
-                            </p>
+                            <p className="text-xs text-red-600 mt-1">{t('combos.productMissingHint')}</p>
                           )}
                         </div>
                         
@@ -663,27 +668,25 @@ const handleToggleStatus = async (combo: Combo) => {
                           return (
                             <>
                               <div>
-                                <Label htmlFor={`size-${index}`}>Size</Label>
+                                <Label htmlFor={`size-${index}`}>{t('combos.sizeLabel')}</Label>
                                 <Select
                                   value={item.variant || ''}
                                   onValueChange={value => updateItem(index, 'variant', value)}
                                 >
                                   <SelectTrigger id={`size-${index}`}>
-                                    <SelectValue placeholder="Select size" />
+                                    <SelectValue placeholder={t('combos.selectSize')} />
                                   </SelectTrigger>
                                   <SelectContent>
                                     {sizes.map(v => (
                                       <SelectItem key={v.id} value={String(v.id)}>
-                                        {v.formatted_weight || 'Default size'}
-                                        {v.is_default ? ' (default)' : ''} — ₹{Number(v.price).toFixed(2)}
+                                        {v.formatted_weight || t('combos.defaultSize')}
+                                        {v.is_default ? t('combos.defaultSuffix') : ''} — ₹{Number(v.price).toFixed(2)}
                                       </SelectItem>
                                     ))}
                                   </SelectContent>
                                 </Select>
                                 {sizes.length === 0 && (
-                                  <p className="text-xs text-red-600 mt-1">
-                                    This product has no active size and cannot be added to a combo.
-                                  </p>
+                                  <p className="text-xs text-red-600 mt-1">{t('combos.noActiveSize')}</p>
                                 )}
                               </div>
 
@@ -697,13 +700,19 @@ const handleToggleStatus = async (combo: Combo) => {
                                       {selectedSize?.formatted_weight ? ` (${selectedSize.formatted_weight})` : ''}
                                     </span>
                                     {(selectedSize ? selectedSize.stock > 0 : selectedProduct.in_stock)
-                                      ? <span className="text-xs text-green-600 bg-green-100 px-2 py-0.5 rounded">In Stock</span>
-                                      : <span className="text-xs text-red-600 bg-red-100 px-2 py-0.5 rounded">Out of Stock</span>}
+                                      ? <span className="text-xs text-green-600 bg-green-100 px-2 py-0.5 rounded">{t('combos.inStock')}</span>
+                                      : <span className="text-xs text-red-600 bg-red-100 px-2 py-0.5 rounded">{t('combos.outOfStock')}</span>}
                                   </div>
                                   <div className="text-muted-foreground flex gap-4">
-                                    <span>Price: ₹{Number(selectedSize?.price ?? selectedProduct.price).toFixed(2)}</span>
-                                    <span>Weight: {selectedSize?.formatted_weight || selectedProduct.weight}</span>
-                                    <span>Stock: {selectedSize?.stock ?? selectedProduct.stock}</span>
+                                    <span>{t('combos.priceLine', {
+                                      price: Number(selectedSize?.price ?? selectedProduct.price).toFixed(2),
+                                    })}</span>
+                                    <span>{t('combos.weightLine', {
+                                      weight: selectedSize?.formatted_weight || selectedProduct.weight,
+                                    })}</span>
+                                    <span>{t('combos.stockLine', {
+                                      stock: selectedSize?.stock ?? selectedProduct.stock,
+                                    })}</span>
                                   </div>
                                 </div>
                               </div>
@@ -713,7 +722,7 @@ const handleToggleStatus = async (combo: Combo) => {
                       </div>
                       
                       <div className="w-24">
-                        <Label htmlFor={`quantity-${index}`}>Qty</Label>
+                        <Label htmlFor={`quantity-${index}`}>{t('combos.qty')}</Label>
                         <Input
                           id={`quantity-${index}`}
                           type="number"
@@ -750,21 +759,16 @@ const handleToggleStatus = async (combo: Combo) => {
               })}
               
               {formData.items.length === 0 && (
-                <p className="text-sm text-muted-foreground">
-                  No products added. Click "Add Product" to add products to this combo.
-                </p>
+                <p className="text-sm text-muted-foreground">{t('combos.noProductsAdded')}</p>
               )}
               
               {formData.items.length > 0 && (
                 <div className="border-t pt-3 mt-2">
                   <div className="flex justify-between items-center text-sm">
-                    <span className="font-medium">Combo MRP:</span>
+                    <span className="font-medium">{t('combos.comboMrp')}</span>
                     <span className="font-mono font-semibold">₹{computedMrp.toFixed(2)}</span>
                   </div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    The sum of these component sizes — this IS the combo's MRP. GST is
-                    charged per component at its own product's rate.
-                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">{t('combos.comboMrpHint')}</p>
                 </div>
               )}
             </div>
@@ -772,15 +776,11 @@ const handleToggleStatus = async (combo: Combo) => {
             {/* Homepage Sections */}
             <div className="space-y-2 rounded-lg border p-3">
               <div>
-                <Label className="text-base">Homepage Sections</Label>
-                <p className="text-xs text-muted-foreground">
-                  Choose which homepage sections this combo appears in.
-                </p>
+                <Label className="text-base">{t('combos.homepageSections')}</Label>
+                <p className="text-xs text-muted-foreground">{t('combos.homepageSectionsHint')}</p>
               </div>
               {sections.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No sections defined yet. Create sections in the Django admin first.
-                </p>
+                <p className="text-sm text-muted-foreground">{t('combos.noSections')}</p>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {sections.map((section) => (
@@ -796,7 +796,7 @@ const handleToggleStatus = async (combo: Combo) => {
                       />
                       <span className="truncate">{section.name}</span>
                       {!section.is_active && (
-                        <span className="text-xs text-muted-foreground">(inactive)</span>
+                        <span className="text-xs text-muted-foreground">{t('combos.sectionInactive')}</span>
                       )}
                     </label>
                   ))}
@@ -813,7 +813,7 @@ const handleToggleStatus = async (combo: Combo) => {
                   onChange={e => setFormData({ ...formData, is_active: e.target.checked })}
                   className="rounded"
                 />
-                <Label htmlFor="is_active" className="cursor-pointer">Active</Label>
+                <Label htmlFor="is_active" className="cursor-pointer">{t('common.active')}</Label>
               </div>
               <div className="flex items-center space-x-2">
                 <input
@@ -823,16 +823,16 @@ const handleToggleStatus = async (combo: Combo) => {
                   onChange={e => setFormData({ ...formData, is_featured: e.target.checked })}
                   className="rounded"
                 />
-                <Label htmlFor="is_featured" className="cursor-pointer">Featured</Label>
+                <Label htmlFor="is_featured" className="cursor-pointer">{t('combos.featured')}</Label>
               </div>
             </div>
             
             <DialogFooter className="gap-2">
               <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); resetForm(); }}>
-                Cancel
+                {t('common.cancel')}
               </Button>
               <Button type="submit" disabled={submitting}>
-                {submitting ? 'Saving...' : (editingCombo ? 'Update' : 'Create')}
+                {submitting ? t('common.saving') : (editingCombo ? t('combos.update') : t('combos.create'))}
               </Button>
             </DialogFooter>
           </form>

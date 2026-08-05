@@ -163,7 +163,9 @@ export const updateProductVariant = async (id: number, data: Partial<ProductVari
 };
 
 export const deleteProductVariant = async (id: number) => {
-  // Returns 204 (deleted) or 200 (deactivated because referenced by orders)
+  // RETIRES the size (is_active=false); the row is never removed from the DB, so
+  // past orders and invoices keep resolving it. 200 on success, 409 if it is the
+  // product's last active size or a combo is built from it.
   const response = await api.delete(`/product-variants/${id}/`);
   return response.data;
 };

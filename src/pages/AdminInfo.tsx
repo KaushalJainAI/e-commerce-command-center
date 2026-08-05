@@ -13,8 +13,11 @@ import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { Save, User, Loader2, CreditCard } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
+import { PageHelp } from '@/components/PageHelp';
+import { useTranslation } from 'react-i18next';
 
 const AdminInfo = () => {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingAccount, setSavingAccount] = useState(false);
@@ -84,8 +87,8 @@ const AdminInfo = () => {
     } catch (error) {
       console.error('Failed to load data:', error);
       toast({
-        title: 'Error',
-        description: 'Failed to load admin info',
+        title: t('common.error'),
+        description: t('adminInfo.loadFailed'),
         variant: 'destructive',
       });
     } finally {
@@ -109,14 +112,14 @@ const AdminInfo = () => {
 
       await updateAdminInfo(updateData);
       toast({
-        title: 'Success',
-        description: 'Profile updated successfully',
+        title: t('products.successTitle'),
+        description: t('adminInfo.profileSaved'),
       });
     } catch (error) {
       console.error('Failed to update profile:', error);
       toast({
-        title: 'Error',
-        description: 'Failed to update profile',
+        title: t('common.error'),
+        description: t('adminInfo.profileSaveFailed'),
         variant: 'destructive',
       });
     } finally {
@@ -135,14 +138,14 @@ const AdminInfo = () => {
         setAccountData(newAccount);
       }
       toast({
-        title: 'Success',
-        description: 'Payment details saved successfully',
+        title: t('products.successTitle'),
+        description: t('adminInfo.paymentSaved'),
       });
     } catch (error) {
       console.error('Failed to save payment details:', error);
       toast({
-        title: 'Error',
-        description: 'Failed to save payment details',
+        title: t('common.error'),
+        description: t('adminInfo.paymentSaveFailed'),
         variant: 'destructive',
       });
     } finally {
@@ -165,9 +168,11 @@ const AdminInfo = () => {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl sm:text-3xl font-bold">Account Settings</h1>
-        <p className="text-muted-foreground">Manage your profile and payment details</p>
+        <h1 className="text-2xl sm:text-3xl font-bold">{t('adminInfo.title')}</h1>
+        <p className="text-muted-foreground">{t('adminInfo.subtitle')}</p>
       </div>
+
+      <PageHelp>{t('adminInfo.pageHelp')}</PageHelp>
 
       {/* Profile Card */}
       <Card>
@@ -177,8 +182,8 @@ const AdminInfo = () => {
               <User className="h-6 w-6 text-primary" />
             </div>
             <div>
-              <CardTitle>Profile Details</CardTitle>
-              <CardDescription>Your personal information</CardDescription>
+              <CardTitle>{t('adminInfo.profileTitle')}</CardTitle>
+              <CardDescription>{t('adminInfo.profileDescription')}</CardDescription>
             </div>
           </div>
         </CardHeader>
@@ -186,7 +191,7 @@ const AdminInfo = () => {
           <form onSubmit={handleSaveProfile} className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="first_name">First Name</Label>
+                <Label htmlFor="first_name">{t('adminInfo.firstName')}</Label>
                 <Input
                   id="first_name"
                   value={formData.first_name}
@@ -194,7 +199,7 @@ const AdminInfo = () => {
                 />
               </div>
               <div>
-                <Label htmlFor="last_name">Last Name</Label>
+                <Label htmlFor="last_name">{t('adminInfo.lastName')}</Label>
                 <Input
                   id="last_name"
                   value={formData.last_name}
@@ -205,11 +210,11 @@ const AdminInfo = () => {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email">{t('common.email')}</Label>
                 <Input id="email" value={formData.email} disabled className="bg-muted" />
               </div>
               <div>
-                <Label htmlFor="phone">Phone</Label>
+                <Label htmlFor="phone">{t('common.phone')}</Label>
                 <Input
                   id="phone"
                   value={formData.phone}
@@ -219,7 +224,7 @@ const AdminInfo = () => {
             </div>
 
             <div>
-              <Label htmlFor="address">Address</Label>
+              <Label htmlFor="address">{t('adminInfo.address')}</Label>
               <Input
                 id="address"
                 value={formData.address}
@@ -229,7 +234,7 @@ const AdminInfo = () => {
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
-                <Label htmlFor="city">City</Label>
+                <Label htmlFor="city">{t('adminInfo.city')}</Label>
                 <Input
                   id="city"
                   value={formData.city}
@@ -237,7 +242,7 @@ const AdminInfo = () => {
                 />
               </div>
               <div>
-                <Label htmlFor="state">State</Label>
+                <Label htmlFor="state">{t('adminInfo.state')}</Label>
                 <Input
                   id="state"
                   value={formData.state}
@@ -245,7 +250,7 @@ const AdminInfo = () => {
                 />
               </div>
               <div>
-                <Label htmlFor="pincode">Pincode</Label>
+                <Label htmlFor="pincode">{t('adminInfo.pincode')}</Label>
                 <Input
                   id="pincode"
                   value={formData.pincode}
@@ -256,7 +261,7 @@ const AdminInfo = () => {
 
             <Button type="submit" disabled={saving}>
               {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-              {saving ? 'Saving...' : 'Save Profile'}
+              {saving ? t('common.saving') : t('adminInfo.saveProfile')}
             </Button>
           </form>
         </CardContent>
@@ -270,8 +275,8 @@ const AdminInfo = () => {
               <CreditCard className="h-6 w-6 text-green-600" />
             </div>
             <div>
-              <CardTitle>Payment Details</CardTitle>
-              <CardDescription>Your UPI and bank account for receiving payments</CardDescription>
+              <CardTitle>{t('adminInfo.paymentTitle')}</CardTitle>
+              <CardDescription>{t('adminInfo.paymentDescription')}</CardDescription>
             </div>
           </div>
         </CardHeader>
@@ -279,51 +284,51 @@ const AdminInfo = () => {
           <form onSubmit={handleSaveAccount} className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="account_holder_name">Account Holder Name *</Label>
+                <Label htmlFor="account_holder_name">{t('adminInfo.accountHolder')}</Label>
                 <Input
                   id="account_holder_name"
                   value={accountForm.account_holder_name}
                   onChange={(e) => setAccountForm({ ...accountForm, account_holder_name: e.target.value })}
                   required
-                  placeholder="John Doe"
+                  placeholder={t('adminInfo.accountHolderPlaceholder')}
                 />
               </div>
               <div>
-                <Label htmlFor="upi_id">UPI ID *</Label>
+                <Label htmlFor="upi_id">{t('adminInfo.upiId')}</Label>
                 <Input
                   id="upi_id"
                   value={accountForm.upi_id}
                   onChange={(e) => setAccountForm({ ...accountForm, upi_id: e.target.value })}
                   required
-                  placeholder="name@upi"
+                  placeholder={t('adminInfo.upiPlaceholder')}
                 />
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="bank_name">Bank Name</Label>
+                <Label htmlFor="bank_name">{t('adminInfo.bankName')}</Label>
                 <Input
                   id="bank_name"
                   value={accountForm.bank_name}
                   onChange={(e) => setAccountForm({ ...accountForm, bank_name: e.target.value })}
-                  placeholder="State Bank of India"
+                  placeholder={t('adminInfo.bankNamePlaceholder')}
                 />
               </div>
               <div>
-                <Label htmlFor="branch_name">Branch Name</Label>
+                <Label htmlFor="branch_name">{t('adminInfo.branchName')}</Label>
                 <Input
                   id="branch_name"
                   value={accountForm.branch_name}
                   onChange={(e) => setAccountForm({ ...accountForm, branch_name: e.target.value })}
-                  placeholder="Main Branch"
+                  placeholder={t('adminInfo.branchNamePlaceholder')}
                 />
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="bank_account_number">Bank Account Number</Label>
+                <Label htmlFor="bank_account_number">{t('adminInfo.accountNumber')}</Label>
                 <Input
                   id="bank_account_number"
                   value={accountForm.bank_account_number}
@@ -332,7 +337,7 @@ const AdminInfo = () => {
                 />
               </div>
               <div>
-                <Label htmlFor="ifsc_code">IFSC Code</Label>
+                <Label htmlFor="ifsc_code">{t('adminInfo.ifsc')}</Label>
                 <Input
                   id="ifsc_code"
                   value={accountForm.ifsc_code}
@@ -344,7 +349,7 @@ const AdminInfo = () => {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="contact_email">Contact Email</Label>
+                <Label htmlFor="contact_email">{t('adminInfo.contactEmail')}</Label>
                 <Input
                   id="contact_email"
                   type="email"
@@ -354,7 +359,7 @@ const AdminInfo = () => {
                 />
               </div>
               <div>
-                <Label htmlFor="contact_phone">Contact Phone</Label>
+                <Label htmlFor="contact_phone">{t('adminInfo.contactPhone')}</Label>
                 <Input
                   id="contact_phone"
                   value={accountForm.contact_phone}
@@ -366,7 +371,7 @@ const AdminInfo = () => {
 
             <Button type="submit" disabled={savingAccount} className="bg-green-600 hover:bg-green-700">
               {savingAccount ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-              {savingAccount ? 'Saving...' : 'Save Payment Details'}
+              {savingAccount ? t('common.saving') : t('adminInfo.savePayment')}
             </Button>
           </form>
         </CardContent>

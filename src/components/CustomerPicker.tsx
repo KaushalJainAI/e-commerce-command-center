@@ -3,6 +3,7 @@ import { getCustomers, Customer } from '@/api/customers';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Loader2, User, X } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 interface CustomerPickerProps {
   /** Bound customer id, or null for "no one in particular". */
@@ -11,7 +12,7 @@ interface CustomerPickerProps {
    *  record), so the picker can name them without a refetch. */
   valueLabel?: string | null;
   onChange: (id: number | null, email: string | null) => void;
-  /** Shown in the empty search box. */
+  /** Shown in the empty search box. Defaults to a translated prompt. */
   placeholder?: string;
   id?: string;
 }
@@ -26,9 +27,10 @@ export const CustomerPicker = ({
   value,
   valueLabel,
   onChange,
-  placeholder = 'Search by email, name or phone…',
+  placeholder,
   id,
 }: CustomerPickerProps) => {
+  const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Customer[] | null>(null);
   const [open, setOpen] = useState(false);
@@ -81,7 +83,7 @@ export const CustomerPicker = ({
       <div className="flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-2">
         <User className="h-4 w-4 shrink-0 text-muted-foreground" />
         <span className="flex-1 truncate text-sm">
-          {valueLabel || `Customer #${value}`}
+          {valueLabel || t('customerPicker.customerNumber', { id: value })}
         </span>
         <Button
           type="button"
@@ -89,7 +91,7 @@ export const CustomerPicker = ({
           size="icon"
           className="h-6 w-6 shrink-0"
           onClick={() => onChange(null, null)}
-          title="Remove the customer restriction"
+          title={t('customerPicker.remove')}
         >
           <X className="h-4 w-4" />
         </Button>
@@ -104,7 +106,7 @@ export const CustomerPicker = ({
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onFocus={() => { if (results) setOpen(true); }}
-        placeholder={placeholder}
+        placeholder={placeholder ?? t('customerPicker.placeholder')}
         autoComplete="off"
       />
       {searching && (
@@ -113,7 +115,7 @@ export const CustomerPicker = ({
       {open && results && (
         <div className="absolute z-50 mt-1 max-h-56 w-full overflow-y-auto rounded-md border bg-popover shadow-lg">
           {results.length === 0 ? (
-            <p className="px-3 py-2 text-sm text-muted-foreground">No customers match.</p>
+            <p className="px-3 py-2 text-sm text-muted-foreground">{t('customerPicker.noMatch')}</p>
           ) : (
             results.map((c) => (
               <button
@@ -124,7 +126,7 @@ export const CustomerPicker = ({
               >
                 <span className="text-sm font-medium">{c.email}</span>
                 <span className="text-xs text-muted-foreground">
-                  {[c.name, c.phone].filter(Boolean).join(' · ') || 'No name on file'}
+                  {[c.name, c.phone].filter(Boolean).join(' · ') || t('customerPicker.noName')}
                 </span>
               </button>
             ))

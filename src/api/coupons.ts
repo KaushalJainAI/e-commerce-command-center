@@ -92,7 +92,16 @@ export const validateCoupon = async (code: string): Promise<CouponValidation> =>
 };
 
 /** Human-readable discount for a coupon of either type. */
-export const formatDiscount = (coupon: Coupon): string =>
+/** The badge text for a coupon's discount.
+ *
+ *  Takes `t` rather than building the sentence itself: "OFF" is UI copy, and an
+ *  api/ module has no React context to translate it in. */
+export const formatDiscount = (
+  coupon: Coupon,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+): string =>
   coupon.discount_type === 'fixed'
-    ? `₹${Number(coupon.discount_amount || 0).toLocaleString('en-IN')} OFF`
-    : `${coupon.discount_percent ?? 0}% OFF`;
+    ? t('coupons.amountOff', {
+        amount: Number(coupon.discount_amount || 0).toLocaleString('en-IN'),
+      })
+    : t('coupons.percentOff', { percent: coupon.discount_percent ?? 0 });

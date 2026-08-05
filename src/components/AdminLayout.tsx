@@ -1,10 +1,13 @@
 import { Outlet } from 'react-router-dom';
 import { useIsFetching } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { SidebarProvider, SidebarTrigger } from '@/components/ui/sidebar';
 import { AdminSidebar } from './AdminSidebar';
 import { GlobalSearch } from './GlobalSearch';
+import { LanguageSwitcher } from './LanguageSwitcher';
 
 const AdminLayout = () => {
+  const { t } = useTranslation();
   // Any in-flight query anywhere in the panel. Pages no longer blank themselves
   // while loading, so this thin bar is what tells the admin work is happening.
   const fetching = useIsFetching() > 0;
@@ -22,8 +25,9 @@ const AdminLayout = () => {
               }`}
             />
             <SidebarTrigger />
-            <h2 className="hidden md:block text-sm sm:text-lg font-semibold truncate">E-Commerce Admin</h2>
+            <h2 className="hidden md:block text-sm sm:text-lg font-semibold truncate">{t('common.appTitle')}</h2>
             <GlobalSearch />
+            <LanguageSwitcher />
           </header>
           <main className="flex-1 p-3 sm:p-6 overflow-x-hidden">
             <Outlet />

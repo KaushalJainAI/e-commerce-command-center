@@ -14,6 +14,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Download, AlertTriangle, Loader2 } from 'lucide-react';
 import { PageHelp } from '@/components/PageHelp';
 import { TableSkeleton } from '@/components/TableSkeleton';
+import { useTranslation } from 'react-i18next';
 
 /** Inclusive [from, to] for the PREVIOUS calendar month — the period GSTR-1 is
  *  filed for. Matches the backend's default so the screen and a bare API call
@@ -31,6 +32,7 @@ const money = (n: number) =>
   `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const GstReport = () => {
+  const { t } = useTranslation();
   const defaults = lastMonth();
   const [from, setFrom] = useState(defaults.from);
   const [to, setTo] = useState(defaults.to);
@@ -54,7 +56,7 @@ const GstReport = () => {
     try {
       await exportHsnSummaryCsv(range.from, range.to);
     } catch {
-      toast({ title: 'Could not download the CSV', variant: 'destructive' });
+      toast({ title: t('gst.downloadFailed'), variant: 'destructive' });
     } finally {
       setDownloading(false);
     }
@@ -64,40 +66,30 @@ const GstReport = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold">GST — HSN summary</h1>
-          <p className="text-sm text-muted-foreground">
-            HSN-wise summary of outward supplies, for GSTR-1 Table 12.
-          </p>
+          <h1 className="text-2xl font-bold">{t('gst.title')}</h1>
+          <p className="text-sm text-muted-foreground">{t('gst.subtitle')}</p>
         </div>
         <Button onClick={download} disabled={downloading}>
           {downloading
             ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             : <Download className="mr-2 h-4 w-4" />}
-          Download CSV
+          {t('gst.downloadCsv')}
         </Button>
       </div>
 
       <PageHelp>
+        <p>{t('gst.help1')}</p>
         <p>
-          For every HSN code you sold in the period: how many packs, the value
-          net of GST, and the GST on it. That is what Table 12 of GSTR-1 asks
-          for, and it cannot be worked out from the tax rate alone — 5% covers
-          many different headings.
+          {t('gst.help2Prefix')}
+          <strong>{t('gst.help2Strong')}</strong>
+          {t('gst.help2Middle')}
+          <strong>{t('gst.help2Not')}</strong>
+          {t('gst.help2Suffix')}
         </p>
         <p>
-          Figures come from the codes stored on each order line at the time of
-          sale, so re-classifying a product today never changes a period you
-          have already filed. <strong>Cancelled and deleted orders are
-          excluded.</strong> Refunds are shown separately and are{' '}
-          <strong>not</strong> subtracted — a refund is a credit note and
-          belongs in Table 9B, not here.
-        </p>
-        <p>
-          Every GST column here is tax <strong>collected from customers</strong>{' '}
-          on your outward supplies. It is not what you pay: that is this less
-          the input credit on everything you bought, which this system doesn't
-          track. Take these numbers into your accounting software and settle the
-          liability there.
+          {t('gst.help3Prefix')}
+          <strong>{t('gst.help3Strong')}</strong>
+          {t('gst.help3Suffix')}
         </p>
       </PageHelp>
 
@@ -108,15 +100,11 @@ const GstReport = () => {
           <CardHeader className="pb-2">
             <CardTitle className="text-base flex items-center gap-2">
               <AlertTriangle className="h-4 w-4 text-amber-600" />
-              {coverage.unclassified_count} product
-              {coverage.unclassified_count === 1 ? '' : 's'} have no HSN code
+              {t('gst.unclassified', { count: coverage.unclassified_count })}
             </CardTitle>
           </CardHeader>
           <CardContent className="text-sm space-y-1">
-            <p className="text-muted-foreground">
-              Their sales appear below under "NOT CLASSIFIED". Set a code on each
-              from the product form.
-            </p>
+            <p className="text-muted-foreground">{t('gst.unclassifiedHint')}</p>
             <p>{coverage.unclassified.map(p => p.name).join(', ')}</p>
           </CardContent>
         </Card>
@@ -127,22 +115,21 @@ const GstReport = () => {
           <CardHeader className="pb-2">
             <CardTitle className="text-base flex items-center gap-2">
               <AlertTriangle className="h-4 w-4 text-amber-600" />
-              {coverage.rate_mismatch_count} product
-              {coverage.rate_mismatch_count === 1 ? '' : 's'} charge a rate that
-              differs from their HSN code
+              {t('gst.mismatch', { count: coverage.rate_mismatch_count })}
             </CardTitle>
           </CardHeader>
           <CardContent className="text-sm space-y-2">
             <p className="text-muted-foreground">
-              Published rates as of {coverage.rates_as_of}. This can be
-              deliberate — check each one and change the rate on the product form
-              if it isn't.
+              {t('gst.mismatchHint', { date: coverage.rates_as_of })}
             </p>
             <ul className="space-y-1">
               {coverage.rate_mismatch.map(p => (
                 <li key={p.id}>
-                  <strong>{p.name}</strong> — charging {p.tax_rate}%, but{' '}
-                  {p.hsn_code} ({p.description}) is {p.expected_rate}%.
+                  <strong>{p.name}</strong>
+                  {t('gst.mismatchLine', {
+                    charged: p.tax_rate, code: p.hsn_code,
+                    description: p.description, expected: p.expected_rate,
+                  })}
                 </li>
               ))}
             </ul>
@@ -152,26 +139,26 @@ const GstReport = () => {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Period</CardTitle>
+          <CardTitle className="text-base">{t('gst.period')}</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex items-end gap-3 flex-wrap">
             <div>
-              <Label htmlFor="from">From</Label>
+              <Label htmlFor="from">{t('gst.from')}</Label>
               <Input id="from" type="date" value={from}
                      onChange={e => setFrom(e.target.value)} />
             </div>
             <div>
-              <Label htmlFor="to">To</Label>
+              <Label htmlFor="to">{t('gst.to')}</Label>
               <Input id="to" type="date" value={to}
                      onChange={e => setTo(e.target.value)} />
             </div>
             <Button variant="outline" onClick={() => setRange({ from, to })}>
-              Show
+              {t('gst.show')}
             </Button>
             {summary && (
               <p className="text-sm text-muted-foreground pb-2">
-                {summary.order_count} order{summary.order_count === 1 ? '' : 's'}
+                {t('gst.orderCount', { count: summary.order_count })}
               </p>
             )}
           </div>
@@ -183,21 +170,19 @@ const GstReport = () => {
           {isLoading ? (
             <TableSkeleton />
           ) : !summary?.rows.length ? (
-            <p className="text-sm text-muted-foreground">
-              No supplies in this period.
-            </p>
+            <p className="text-sm text-muted-foreground">{t('gst.noSupplies')}</p>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>HSN / SAC</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead className="text-center">UQC</TableHead>
-                  <TableHead className="text-right">Qty</TableHead>
-                  <TableHead className="text-right">Rate</TableHead>
-                  <TableHead className="text-right">Taxable value</TableHead>
-                  <TableHead className="text-right">GST</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
+                  <TableHead>{t('gst.colHsn')}</TableHead>
+                  <TableHead>{t('common.description')}</TableHead>
+                  <TableHead className="text-center">{t('gst.colUqc')}</TableHead>
+                  <TableHead className="text-right">{t('gst.colQty')}</TableHead>
+                  <TableHead className="text-right">{t('gst.colRate')}</TableHead>
+                  <TableHead className="text-right">{t('gst.colTaxable')}</TableHead>
+                  <TableHead className="text-right">{t('gst.colGst')}</TableHead>
+                  <TableHead className="text-right">{t('common.total')}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -207,7 +192,7 @@ const GstReport = () => {
                     className={row.is_unclassified ? 'bg-amber-500/10' : undefined}
                   >
                     <TableCell className="font-mono">
-                      {row.hsn_code || 'NOT CLASSIFIED'}
+                      {row.hsn_code || t('gst.notClassified')}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {row.description}
@@ -229,7 +214,7 @@ const GstReport = () => {
                   </TableRow>
                 ))}
                 <TableRow className="font-semibold">
-                  <TableCell colSpan={3}>Total</TableCell>
+                  <TableCell colSpan={3}>{t('common.total')}</TableCell>
                   <TableCell className="text-right">
                     {summary.totals.quantity}
                   </TableCell>
@@ -250,10 +235,12 @@ const GstReport = () => {
 
           {!!summary?.refunded_in_period.amount && (
             <p className="text-xs text-muted-foreground mt-4">
-              Refunds recorded in this period (credit notes — reported in Table
-              9B, <strong>not</strong> netted off above):{' '}
-              {money(summary.refunded_in_period.amount)}, including GST of{' '}
-              {money(summary.refunded_in_period.tax)}.
+              {t('gst.refundsNotePrefix')}
+              <strong>{t('gst.refundsNoteNot')}</strong>
+              {t('gst.refundsNoteSuffix', {
+                amount: money(summary.refunded_in_period.amount),
+                tax: money(summary.refunded_in_period.tax),
+              })}
             </p>
           )}
         </CardContent>
