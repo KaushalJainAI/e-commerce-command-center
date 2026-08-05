@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { num, pct } from '../format';
 
 export interface Stage {
@@ -6,16 +7,6 @@ export interface Stage {
   pct_of_top: number | null;
   step_conversion_pct: number | null;
 }
-
-const LABELS: Record<string, string> = {
-  view: 'Product views',
-  add_to_cart: 'Added to cart',
-  checkout_started: 'Checkout started',
-  purchase: 'Purchased',
-  page_view: 'Page views',
-  product_view: 'Product views',
-  checkout_completed: 'Checkout completed',
-};
 
 interface Props {
   stages: Stage[];
@@ -27,14 +18,20 @@ interface Props {
  * step-conversion between stages. Clearer than a generic bar chart for an
  * ordered drop-off, and renders without a chart lib so labels never clip.
  */
-export const FunnelChart = ({ stages, color = '#6366f1' }: Props) => (
+export const FunnelChart = ({ stages, color = '#6366f1' }: Props) => {
+  const { t } = useTranslation();
+  // The backend sends raw stage slugs; an unknown one falls back to the slug
+  // rather than rendering a missing-key path.
+  const label = (stage: string) =>
+    t(`insights.funnel.stage.${stage}`, { defaultValue: stage });
+  return (
   <div className="flex h-full flex-col justify-center gap-3 py-2">
     {stages.map((s, i) => {
       const width = Math.min(s.pct_of_top ?? 0, 100);
       return (
         <div key={s.stage}>
           <div className="mb-1 flex items-center justify-between text-sm">
-            <span className="font-medium">{LABELS[s.stage] ?? s.stage}</span>
+            <span className="font-medium">{label(s.stage)}</span>
             <span className="text-muted-foreground">
               {num(s.count)}
               {s.pct_of_top !== null && <span className="ml-2">{pct(s.pct_of_top)}</span>}
@@ -48,11 +45,12 @@ export const FunnelChart = ({ stages, color = '#6366f1' }: Props) => (
           </div>
           {i > 0 && s.step_conversion_pct !== null && (
             <div className="mt-0.5 text-right text-xs text-muted-foreground">
-              ↳ {pct(s.step_conversion_pct)} from previous
+              ↳ {pct(s.step_conversion_pct)} {t('insights.funnel.fromPrevious')}
             </div>
           )}
         </div>
       );
     })}
   </div>
-);
+  );
+};

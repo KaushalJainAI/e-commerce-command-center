@@ -7,8 +7,11 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { ShoppingBag } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 
 const Login = () => {
+  const { t } = useTranslation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -27,13 +30,13 @@ const Login = () => {
     try {
       await login(email, password);
       toast({
-        title: 'Welcome back!',
-        description: 'You have successfully logged in.',
+        title: t('login.successTitle'),
+        description: t('login.successBody'),
       });
     } catch (error) {
       toast({
-        title: 'Login failed',
-        description: 'Invalid email or password. Please try again.',
+        title: t('login.failedTitle'),
+        description: t('login.failedBody'),
         variant: 'destructive',
       });
     } finally {
@@ -42,32 +45,36 @@ const Login = () => {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-primary/5 via-background to-accent/5 p-4">
+    <div className="relative flex min-h-screen items-center justify-center bg-gradient-to-br from-primary/5 via-background to-accent/5 p-4">
+      {/* The panel shell is behind the login wall, so without this the language
+          could not be changed until after signing in — no use to an admin who
+          cannot read the sign-in form. */}
+      <div className="absolute right-4 top-4">
+        <LanguageSwitcher />
+      </div>
       <Card className="w-full max-w-md shadow-lg">
         <CardHeader className="space-y-3 text-center">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
             <ShoppingBag className="h-7 w-7 text-primary" />
           </div>
-          <CardTitle className="text-2xl font-bold">Admin Panel</CardTitle>
-          <CardDescription>
-            Sign in to manage your e-commerce store
-          </CardDescription>
+          <CardTitle className="text-2xl font-bold">{t('login.title')}</CardTitle>
+          <CardDescription>{t('login.subtitle')}</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">{t('login.email')}</Label>
               <Input
                 id="email"
                 type="email"
-                placeholder="admin@example.com"
+                placeholder={t('login.emailPlaceholder')}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">{t('login.password')}</Label>
               <Input
                 id="password"
                 type="password"
@@ -78,7 +85,7 @@ const Login = () => {
               />
             </div>
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? 'Signing in...' : 'Sign In'}
+              {loading ? t('login.submitting') : t('login.submit')}
             </Button>
           </form>
         </CardContent>

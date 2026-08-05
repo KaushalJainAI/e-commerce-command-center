@@ -6,6 +6,13 @@ export interface ComboItem {
   product: number;         // product ID
   product_name?: string;
   product_slug?: string;
+  /** The exact packaging size this combo bundles. Price and stock come from
+   *  here — a combo means "1 x 500g", not "1 x whichever size is default". */
+  variant: number;
+  variant_label?: string;
+  variant_price?: string;
+  variant_stock?: number;
+  variant_is_active?: boolean;
   quantity: number;
 }
 
@@ -17,10 +24,16 @@ export interface Combo {
   title?: string;
   subtitle?: string;
   description?: string;
+  /** READ-ONLY MRP. Derived server-side as the sum of the component sizes'
+   *  prices — posting it does nothing. Change the components to change it. */
   price: number;
+  /** The only price an admin sets: what the bundle actually sells for.
+   *  Must be below `price`. */
   discount_price?: number;
   final_price?: number;
   discount_percentage?: number;
+  /** Same figure as `price`; kept because the storefront renders it as the
+   *  strike-through. */
   total_original_price?: number;
   total_weight?: string;
   weight?: number;

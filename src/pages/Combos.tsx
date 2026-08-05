@@ -1,4 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useAdminData, useInvalidate } from '@/hooks/useAdminData';
+import { TableSkeleton } from '@/components/TableSkeleton';
 import { getCombos, getCombo, createCombo, updateCombo, updateComboSections, Combo, ComboItem } from '@/api/combos';
 import { getProducts, Product } from '@/api/products';
 import { getSections, ProductSection } from '@/api/sections';
@@ -12,23 +15,36 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { Plus, Edit, ToggleLeft, ToggleRight, X } from 'lucide-react';
+import { PageHelp } from '@/components/PageHelp';
+import { useTranslation } from 'react-i18next';
 
 
 const Combos = () => {
-  const [combos, setCombos] = useState<Combo[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [allProducts, setAllProducts] = useState<Product[]>([]);
-  const [sections, setSections] = useState<ProductSection[]>([]);
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const invalidate = useInvalidate();
+  const {
+    data: combos = [], isInitialLoading, refreshing, refetch: fetchCombos,
+  } = useAdminData(['combos'], () => getCombos().then(r => r.data || []));
+  // Shared cache with Products/Sections — opening this page after those is free.
+  const { data: allProducts = [], refetch: fetchAllProducts } =
+    useAdminData(['products'], () => getProducts().then(r => r.data));
+  const { data: sections = [] } = useAdminData(['sections'], () => getSections());
+  // Only active products can go into a new combo, but an existing combo may
+  // still reference one that was since deactivated — hence both lists.
+  const products = allProducts.filter(p => p.is_active);
   const [selectedSections, setSelectedSections] = useState<number[]>([]);
-  const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingCombo, setEditingCombo] = useState<Combo | null>(null);
   const [formData, setFormData] = useState({
     name: '',
     slug: '',
     description: '',
-    items: [] as { product: string; quantity: number }[],
-    price: '',
+    // `variant` is the packaging size bundled — the unit of price and stock.
+    items: [] as { product: string; variant: string; quantity: number }[],
+    // NOTE: no `price`. A combo's MRP is DERIVED server-side as the sum of its
+    // component sizes' prices, so it is displayed (see computedMrp) but never
+    // typed or posted. `discount_price` is the only price an admin sets.
     discount_price: '',
     weight: '',
     unit: 'g',
@@ -42,56 +58,10 @@ const Combos = () => {
 
   const { toast } = useToast();
 
-  useEffect(() => {
-    const init = async () => {
-      try {
-        const [combosRes, productsRes, sectionsRes] = await Promise.all([
-          getCombos(), getProducts(), getSections(),
-        ]);
-        setCombos(combosRes.data || []);
-        const activeProducts = productsRes.data.filter((p) => p.is_active);
-        setProducts(activeProducts);
-        setAllProducts(productsRes.data);
-        setSections(sectionsRes || []);
-      } catch {
-        toast({
-          title: 'Error',
-          description: 'Failed to load combos or products',
-          variant: 'destructive',
-        });
-      } finally {
-        setLoading(false);
-      }
-    };
-    init();
-  }, [toast]);
-
-  const fetchCombos = async () => {
-    try {
-      const response = await getCombos();
-      setCombos(response.data || []);
-    } catch {
-      toast({
-        title: 'Error',
-        description: 'Failed to load combos',
-        variant: 'destructive',
-      });
-    }
-  };
-
-  const fetchAllProducts = async () => {
-    try {
-      const response = await getProducts();
-      setAllProducts(response.data);
-      setProducts(response.data.filter((p) => p.is_active));
-    } catch {
-      toast({
-        title: 'Error',
-        description: 'Failed to load products',
-        variant: 'destructive',
-      });
-    }
-  };
+  /** Patch one combo's active flag in the cached list (optimistic + revert). */
+  const setComboActive = (id: number, isActive: boolean) =>
+    queryClient.setQueryData(['combos'], (prev: Combo[] | undefined) =>
+      prev?.map(c => (c.id === id ? { ...c, is_active: isActive } : c)));
 
   const parseNumberOrZero = (value: string) => {
     const n = parseFloat(value);
@@ -109,7 +79,7 @@ const Combos = () => {
     form.append('name', formData.name);
     if (formData.slug && !editingCombo) form.append('slug', formData.slug);
     if (formData.description) form.append('description', formData.description);
-    form.append('price', String(parseNumberOrZero(formData.price)));
+    // No `price`: the server derives the MRP from the items posted below.
     if (formData.discount_price) {
       form.append('discount_price', String(parseNumberOrZero(formData.discount_price)));
     }
@@ -119,12 +89,15 @@ const Combos = () => {
     form.append('is_active', String(formData.is_active));
     form.append('is_featured', String(formData.is_featured));
     
-    // Build items array - use product ID (not slug)
+    // Build items array — send the SIZE (variant) as well as the product. The
+    // backend keys the component on the variant; sending product alone makes it
+    // fall back to the default size, which is what we're fixing.
     const items = formData.items
       .filter((i) => i.product !== '')
-      .map((i) => ({ 
+      .map((i) => ({
         product: i.product,  // This should be the product ID
-        quantity: i.quantity || 1 
+        variant: i.variant || undefined,
+        quantity: i.quantity || 1
       }));
     
     // Always append items as JSON string
@@ -142,13 +115,31 @@ const Combos = () => {
     const validItems = formData.items.filter((i) => i.product !== '');
     if (validItems.length === 0) {
       toast({
-        title: 'Validation error',
-        description: 'Please add at least one product to the combo',
+        title: t('combos.validationTitle'),
+        description: t('combos.needOneProduct'),
         variant: 'destructive',
       });
       return;
     }
-    
+
+    // Mirror the server's rule, so the admin sees the problem next to the field
+    // rather than as a 400 after upload. The MRP is derived, so a selling price
+    // at or above it means the bundle is no cheaper than buying the parts.
+    // `>` not `>=`: the server (ProductCombo.clean / ProductComboSerializer.validate)
+    // permits a bundle priced exactly AT the sum of its parts — a legitimate
+    // curation with no discount, which the field's own help text promises. Only
+    // charging MORE than à-la-carte is wrong.
+    const sellingPrice = parseNumberOrZero(formData.discount_price);
+    if (formData.discount_price && sellingPrice > computedMrp) {
+      toast({
+        title: t('combos.validationTitle'),
+        description: t('combos.priceAboveMrp', { mrp: computedMrp.toFixed(2) }),
+        variant: 'destructive',
+      });
+      return;
+    }
+
+
     setSubmitting(true);
     
     try {
@@ -159,11 +150,11 @@ const Combos = () => {
       if (editingCombo) {
         await updateCombo(editingCombo.slug, form);
         comboSlug = editingCombo.slug;
-        toast({ title: 'Success', description: 'Combo updated successfully' });
+        toast({ title: t('combos.successTitle'), description: t('combos.updatedBody') });
       } else {
         const created = await createCombo(form);
         comboSlug = created.slug;
-        toast({ title: 'Success', description: 'Combo created successfully' });
+        toast({ title: t('combos.successTitle'), description: t('combos.createdBody') });
       }
 
       // Replace homepage-section placements (separate JSON PATCH so an empty
@@ -172,12 +163,13 @@ const Combos = () => {
 
       setDialogOpen(false);
       resetForm();
-      fetchCombos();
+      // A combo's section placements just changed too.
+      invalidate(['combos'], ['sections']);
     } catch (error: any) {
       console.error('Submit error:', error);
       toast({
-        title: 'Error',
-        description: error.message || 'Failed to save combo',
+        title: t('common.error'),
+        description: error.message || t('combos.saveFailed'),
         variant: 'destructive',
       });
     } finally {
@@ -188,19 +180,15 @@ const handleToggleStatus = async (combo: Combo) => {
   const newStatus = !combo.is_active;
   
   // Optimistic update
-  setCombos(prevCombos => 
-    prevCombos.map(c => 
-      c.id === combo.id ? { ...c, is_active: newStatus } : c
-    )
-  );
-  
+  setComboActive(combo.id, newStatus);
+
   try {
     // Send as JSON instead of FormData for simple updates
     await updateCombo(combo.slug, { is_active: newStatus });
     
     toast({
-      title: 'Success',
-      description: `Combo marked as ${newStatus ? 'active' : 'inactive'}`,
+      title: t('combos.successTitle'),
+      description: newStatus ? t('combos.markedActive') : t('combos.markedInactive'),
     });
     
     if (editingCombo && editingCombo.id === combo.id) {
@@ -210,15 +198,11 @@ const handleToggleStatus = async (combo: Combo) => {
   } catch (error) {
     console.error('Toggle status error:', error);
     // Revert on error
-    setCombos(prevCombos => 
-      prevCombos.map(c => 
-        c.id === combo.id ? { ...c, is_active: !newStatus } : c
-      )
-    );
-    
+    setComboActive(combo.id, !newStatus);
+
     toast({
-      title: 'Error',
-      description: 'Failed to update combo status',
+      title: t('common.error'),
+      description: t('combos.statusFailed'),
       variant: 'destructive',
     });
   }
@@ -229,7 +213,7 @@ const handleToggleStatus = async (combo: Combo) => {
     await fetchAllProducts();
     setFormData((prev) => ({
       ...prev,
-      items: [...prev.items, { product: '', quantity: 1 }],
+      items: [...prev.items, { product: '', variant: '', quantity: 1 }],
     }));
   };
 
@@ -242,12 +226,20 @@ const handleToggleStatus = async (combo: Combo) => {
 
   const updateItem = (
     index: number,
-    field: 'product' | 'quantity',
+    field: 'product' | 'variant' | 'quantity',
     value: string | number,
   ) => {
     setFormData((prev) => {
       const updated = [...prev.items];
       updated[index] = { ...updated[index], [field]: value };
+      // Switching product invalidates the chosen size — preselect that
+      // product's default so the line is never left without one.
+      if (field === 'product') {
+        const product = allProducts.find(p => String(p.id) === String(value));
+        const sizes = (product?.variants || []).filter(v => v.is_active);
+        const preferred = sizes.find(v => v.is_default) ?? sizes[0];
+        updated[index].variant = preferred ? String(preferred.id) : '';
+      }
       return { ...prev, items: updated };
     });
   };
@@ -264,6 +256,7 @@ const handleToggleStatus = async (combo: Combo) => {
       // Map items - use product ID from the response
       const mappedItems = (fullCombo.items || []).map((i: ComboItem) => ({
         product: String(i.product),  // This is the product ID
+        variant: i.variant ? String(i.variant) : '',
         quantity: i.quantity,
       }));
       
@@ -273,7 +266,7 @@ const handleToggleStatus = async (combo: Combo) => {
         slug: fullCombo.slug,
         description: fullCombo.description || '',
         items: mappedItems,
-        price: fullCombo.price !== undefined && fullCombo.price !== null ? String(fullCombo.price) : '',
+        // No `price` — it is derived from `items` and shown read-only.
         discount_price: fullCombo.discount_price !== undefined && fullCombo.discount_price !== null ? String(fullCombo.discount_price) : '',
         weight: fullCombo.weight !== undefined && fullCombo.weight !== null ? String(fullCombo.weight) : '',
         unit: fullCombo.unit || 'g',
@@ -288,8 +281,8 @@ const handleToggleStatus = async (combo: Combo) => {
     } catch (error) {
       console.error('Failed to load combo:', error);
       toast({
-        title: 'Error',
-        description: 'Failed to load combo details',
+        title: t('common.error'),
+        description: t('combos.loadDetailsFailed'),
         variant: 'destructive',
       });
       setEditingCombo(null);
@@ -303,7 +296,6 @@ const handleToggleStatus = async (combo: Combo) => {
       slug: '',
       description: '',
       items: [],
-      price: '',
       discount_price: '',
       weight: '',
       unit: 'g',
@@ -335,38 +327,53 @@ const handleToggleStatus = async (combo: Combo) => {
     return allProducts.find(p => String(p.id) === String(productId));
   };
 
-  if (loading) {
-    return <div className="flex items-center justify-center min-h-[400px]">Loading...</div>;
-  }
+  /**
+   * The MRP the backend will derive: sum of each component SIZE's price times
+   * its quantity. Must price off the variant, not `product.price` (a mirror of
+   * whichever size happens to be default), or the figure shown here disagrees
+   * with the one the API returns after saving.
+   */
+  const computedMrp = formData.items.reduce((total, item) => {
+    const product = getProductById(item.product);
+    const size = (product?.variants || []).find(v => String(v.id) === item.variant);
+    const unitPrice = Number(size?.price ?? product?.price ?? 0);
+    return total + unitPrice * (item.quantity || 1);
+  }, 0);
 
   return (
     <div className="space-y-6 p-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Combos</h1>
-          <p className="text-muted-foreground">Manage product combinations</p>
+          <h1 className="text-3xl font-bold tracking-tight">{t('combos.title')}</h1>
+          <p className="text-muted-foreground">{t('combos.subtitle')}</p>
         </div>
         <Button onClick={() => { resetForm(); setDialogOpen(true); }}>
-          <Plus className="mr-2 h-4 w-4" /> Add Combo
+          <Plus className="mr-2 h-4 w-4" /> {t('combos.addButton')}
         </Button>
       </div>
 
+      <PageHelp>{t('combos.pageHelp')}</PageHelp>
+
       <Card>
         <CardHeader>
-          <CardTitle>All Combos</CardTitle>
+          <CardTitle>{t('combos.allCombos')}</CardTitle>
         </CardHeader>
-        <CardContent className="overflow-x-auto">
+        <CardContent
+          className={`overflow-x-auto transition-opacity ${refreshing ? 'opacity-60' : 'opacity-100'}`}
+        >
+          {isInitialLoading ? <TableSkeleton rows={6} columns={6} /> : (
+          <>
           <Table className="min-w-[600px]">
             <TableHeader>
               <TableRow>
-                <TableHead>Image</TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Products</TableHead>
-                <TableHead>Price</TableHead>
-                <TableHead>Discount</TableHead>
-                <TableHead>Weight</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead>{t('common.image')}</TableHead>
+                <TableHead>{t('common.name')}</TableHead>
+                <TableHead>{t('combos.colProducts')}</TableHead>
+                <TableHead>{t('common.price')}</TableHead>
+                <TableHead>{t('combos.colDiscountedPrice')}</TableHead>
+                <TableHead>{t('combos.colWeight')}</TableHead>
+                <TableHead>{t('common.status')}</TableHead>
+                <TableHead className="text-right">{t('common.actions')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -385,7 +392,7 @@ const handleToggleStatus = async (combo: Combo) => {
                       )}
                     </TableCell>
                     <TableCell className="font-medium">{combo.name}</TableCell>
-                    <TableCell>{combo.items?.length || 0} products</TableCell>
+                    <TableCell>{t('combos.productsCount', { count: combo.items?.length || 0 })}</TableCell>
                     <TableCell className="font-mono">
                       {price !== null ? `₹${price}` : '—'}
                     </TableCell>
@@ -403,7 +410,7 @@ const handleToggleStatus = async (combo: Combo) => {
                             : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
                         }`
                       }>
-                        {combo.is_active ? 'Active' : 'Inactive'}
+                        {combo.is_active ? t('common.active') : t('common.inactive')}
                       </span>
                     </TableCell>
                     <TableCell className="text-right space-x-1">
@@ -411,7 +418,7 @@ const handleToggleStatus = async (combo: Combo) => {
                         variant="ghost" 
                         size="icon" 
                         onClick={() => openEditDialog(combo)} 
-                        title="Edit combo"
+                        title={t('combos.editTooltip')}
                       >
                         <Edit className="h-4 w-4" />
                       </Button>
@@ -419,7 +426,9 @@ const handleToggleStatus = async (combo: Combo) => {
                         variant="ghost"
                         size="icon"
                         onClick={() => handleToggleStatus(combo)}
-                        title={combo.is_active ? 'Deactivate combo' : 'Activate combo'}
+                        title={combo.is_active
+                          ? t('combos.deactivateTooltip')
+                          : t('combos.activateTooltip')}
                         className={
                           combo.is_active
                             ? 'hover:bg-green-500/10 text-green-600 hover:text-green-700'
@@ -438,8 +447,10 @@ const handleToggleStatus = async (combo: Combo) => {
           </Table>
           {combos.length === 0 && (
             <div className="text-center py-12">
-              <p className="text-muted-foreground">No combos found.</p>
+              <p className="text-muted-foreground">{t('combos.noneFound')}</p>
             </div>
+          )}
+          </>
           )}
         </CardContent>
       </Card>
@@ -453,9 +464,9 @@ const handleToggleStatus = async (combo: Combo) => {
       >
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editingCombo ? 'Edit Combo' : 'Add New Combo'}</DialogTitle>
+            <DialogTitle>{editingCombo ? t('combos.editTitle') : t('combos.addTitle')}</DialogTitle>
             <DialogDescription>
-              {editingCombo ? 'Update combo information' : 'Create a new combo'}
+              {editingCombo ? t('combos.editDescription') : t('combos.addDescription')}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -464,11 +475,13 @@ const handleToggleStatus = async (combo: Combo) => {
                 {imagePreview ? (
                   <img src={imagePreview} alt="Combo" className="h-full w-full object-cover" />
                 ) : (
-                  <span className="text-xs text-muted-foreground text-center px-2">No image</span>
+                  <span className="text-xs text-muted-foreground text-center px-2">
+                    {t('combos.noImage')}
+                  </span>
                 )}
               </div>
               <div className="space-y-1">
-                <Label htmlFor="image">Combo image</Label>
+                <Label htmlFor="image">{t('combos.comboImage')}</Label>
                 <Input
                   id="image"
                   type="file"
@@ -476,61 +489,59 @@ const handleToggleStatus = async (combo: Combo) => {
                   onChange={handleImageChange}
                   className="cursor-pointer"
                 />
-                <p className="text-xs text-muted-foreground">Upload a clear combo image.</p>
+                <p className="text-xs text-muted-foreground">{t('combos.imageHint')}</p>
               </div>
             </div>
             
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="name">Name *</Label>
+                <Label htmlFor="name">{t('combos.nameLabel')}</Label>
                 <Input
                   id="name"
                   value={formData.name}
                   onChange={e => setFormData({ ...formData, name: e.target.value })}
                   required
-                  placeholder="Combo name"
+                  placeholder={t('combos.namePlaceholder')}
                 />
               </div>
 
               <div>
-                <Label htmlFor="slug">Slug</Label>
+                <Label htmlFor="slug">{t('combos.slugLabel')}</Label>
                 <Input
                   id="slug"
                   value={formData.slug}
                   onChange={e => setFormData({ ...formData, slug: e.target.value })}
-                  placeholder="combo-slug"
+                  placeholder={t('combos.slugPlaceholder')}
                   disabled={!!editingCombo}
                 />
               </div>
             </div>
             
             <div>
-              <Label htmlFor="description">Description</Label>
+              <Label htmlFor="description">{t('combos.descriptionLabel')}</Label>
               <Textarea
                 id="description"
                 value={formData.description}
                 onChange={e => setFormData({ ...formData, description: e.target.value })}
-                placeholder="Combo description"
+                placeholder={t('combos.descriptionPlaceholder')}
                 rows={3}
               />
             </div>
             
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="price">Price *</Label>
+                <Label htmlFor="mrp">{t('combos.mrpLabel')}</Label>
                 <Input
-                  id="price"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={formData.price}
-                  onChange={e => setFormData({ ...formData, price: e.target.value })}
-                  required
-                  placeholder="0.00"
+                  id="mrp"
+                  value={`₹${computedMrp.toFixed(2)}`}
+                  readOnly
+                  disabled
+                  className="bg-muted font-mono"
                 />
+                <p className="text-xs text-muted-foreground mt-1">{t('combos.mrpHint')}</p>
               </div>
               <div>
-                <Label htmlFor="discount_price">Discount Price</Label>
+                <Label htmlFor="discount_price">{t('combos.sellingPriceLabel')}</Label>
                 <Input
                   id="discount_price"
                   type="number"
@@ -540,12 +551,13 @@ const handleToggleStatus = async (combo: Combo) => {
                   onChange={e => setFormData({ ...formData, discount_price: e.target.value })}
                   placeholder="0.00"
                 />
+                <p className="text-xs text-muted-foreground mt-1">{t('combos.sellingPriceHint')}</p>
               </div>
             </div>
 
             <div className="flex flex-col sm:flex-row gap-2">
               <div className="flex-1">
-                <Label htmlFor="weight">Weight</Label>
+                <Label htmlFor="weight">{t('combos.weightLabel')}</Label>
                 <Input
                   id="weight"
                   type="number"
@@ -553,18 +565,18 @@ const handleToggleStatus = async (combo: Combo) => {
                   min="0"
                   value={formData.weight}
                   onChange={e => setFormData({ ...formData, weight: e.target.value })}
-                  placeholder="e.g. 500 (number only)"
+                  placeholder={t('combos.weightPlaceholder')}
                 />
-                <p className="text-xs text-muted-foreground mt-1">Please enter numbers only.</p>
+                <p className="text-xs text-muted-foreground mt-1">{t('combos.weightHint')}</p>
               </div>
               <div className="w-24">
-                <Label htmlFor="unit">Unit</Label>
+                <Label htmlFor="unit">{t('combos.unitLabel')}</Label>
                 <Select
                   value={formData.unit}
                   onValueChange={value => setFormData({ ...formData, unit: value })}
                 >
                   <SelectTrigger id="unit">
-                    <SelectValue placeholder="Unit" />
+                    <SelectValue placeholder={t('combos.unitLabel')} />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="g">g</SelectItem>
@@ -581,7 +593,7 @@ const handleToggleStatus = async (combo: Combo) => {
             </div>
 
             <div>
-              <Label htmlFor="low_stock_threshold">Low-stock alert level</Label>
+              <Label htmlFor="low_stock_threshold">{t('combos.lowStockLabel')}</Label>
               <Input
                 id="low_stock_threshold"
                 type="number"
@@ -589,22 +601,21 @@ const handleToggleStatus = async (combo: Combo) => {
                 step="1"
                 value={formData.low_stock_threshold}
                 onChange={e => setFormData({ ...formData, low_stock_threshold: e.target.value })}
-                placeholder="e.g. 5"
+                placeholder={t('combos.lowStockPlaceholder')}
               />
               <p className="text-xs text-muted-foreground mt-1">
-                Email the admin when the number of combos that can still be built
-                (limited by the scarcest product in it) drops to this or below.
+                {t('combos.lowStockHint')}
                 {editingCombo?.available_stock !== undefined && (
-                  <> Currently {editingCombo.available_stock} can be built.</>
+                  <>{t('combos.lowStockCurrent', { count: editingCombo.available_stock })}</>
                 )}
               </p>
             </div>
 
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <Label>Products in Combo *</Label>
+                <Label>{t('combos.productsInCombo')}</Label>
                 <Button type="button" variant="outline" size="sm" onClick={addProductToCombo}>
-                  <Plus className="h-4 w-4 mr-1" /> Add Product
+                  <Plus className="h-4 w-4 mr-1" /> {t('combos.addProduct')}
                 </Button>
               </div>
               
@@ -621,7 +632,10 @@ const handleToggleStatus = async (combo: Combo) => {
                       <div className="flex-1 space-y-3 w-full">
                         <div>
                           <Label htmlFor={`product-${index}`}>
-                            Product {isProductMissing && <span className="text-red-600">(Not Available)</span>}
+                            {t('combos.productLabel')}{' '}
+                            {isProductMissing && (
+                              <span className="text-red-600">{t('combos.notAvailable')}</span>
+                            )}
                           </Label>
                           <Select
                             value={item.product === '' ? '' : item.product}
@@ -629,48 +643,86 @@ const handleToggleStatus = async (combo: Combo) => {
                           >
                             <SelectTrigger id={`product-${index}`} className={isProductMissing ? 'border-red-500' : ''}>
                               <SelectValue placeholder={isProductMissing
-                                ? `Product ID: ${item.product} (Not Found)`
-                                : "Select product"} />
+                                ? t('combos.productNotFound', { id: item.product })
+                                : t('combos.selectProduct')} />
                             </SelectTrigger>
                             <SelectContent>
                               {allProducts.map(product => (
                                 <SelectItem key={product.id} value={String(product.id)}>
                                   {product.name} {product.weight ? `- ${product.weight}` : ''}
-                                  {!product.is_active && ' (Inactive)'}
+                                  {!product.is_active && t('combos.inactiveSuffix')}
                                 </SelectItem>
                               ))}
                             </SelectContent>
                           </Select>
                           {isProductMissing && (
-                            <p className="text-xs text-red-600 mt-1">
-                              This product no longer exists. Please select a different product or remove this item.
-                            </p>
+                            <p className="text-xs text-red-600 mt-1">{t('combos.productMissingHint')}</p>
                           )}
                         </div>
                         
-                        {selectedProduct && !isProductMissing && (
-                          <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-md">
-                            {selectedProduct.image &&
-                              <img src={selectedProduct.image} alt={selectedProduct.name} className="h-12 w-12 rounded object-cover" />}
-                            <div className="flex-1 text-sm space-y-1">
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium">{selectedProduct.name}</span>
-                                {selectedProduct.in_stock
-                                  ? <span className="text-xs text-green-600 bg-green-100 px-2 py-0.5 rounded">In Stock</span>
-                                  : <span className="text-xs text-red-600 bg-red-100 px-2 py-0.5 rounded">Out of Stock</span>}
+                        {selectedProduct && !isProductMissing && (() => {
+                          // The combo consumes a SIZE, so the size drives both
+                          // the picker below and the price/stock shown.
+                          const sizes = (selectedProduct.variants || []).filter(v => v.is_active);
+                          const selectedSize = sizes.find(v => String(v.id) === item.variant) ?? null;
+                          return (
+                            <>
+                              <div>
+                                <Label htmlFor={`size-${index}`}>{t('combos.sizeLabel')}</Label>
+                                <Select
+                                  value={item.variant || ''}
+                                  onValueChange={value => updateItem(index, 'variant', value)}
+                                >
+                                  <SelectTrigger id={`size-${index}`}>
+                                    <SelectValue placeholder={t('combos.selectSize')} />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {sizes.map(v => (
+                                      <SelectItem key={v.id} value={String(v.id)}>
+                                        {v.formatted_weight || t('combos.defaultSize')}
+                                        {v.is_default ? t('combos.defaultSuffix') : ''} — ₹{Number(v.price).toFixed(2)}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                {sizes.length === 0 && (
+                                  <p className="text-xs text-red-600 mt-1">{t('combos.noActiveSize')}</p>
+                                )}
                               </div>
-                              <div className="text-muted-foreground flex gap-4">
-                                <span>Price: ₹{Number(selectedProduct.price).toFixed(2)}</span>
-                                <span>Weight: {selectedProduct.weight}</span>
-                                <span>Stock: {selectedProduct.stock}</span>
+
+                              <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-md">
+                                {selectedProduct.image &&
+                                  <img src={selectedProduct.image} alt={selectedProduct.name} className="h-12 w-12 rounded object-cover" />}
+                                <div className="flex-1 text-sm space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-medium">
+                                      {selectedProduct.name}
+                                      {selectedSize?.formatted_weight ? ` (${selectedSize.formatted_weight})` : ''}
+                                    </span>
+                                    {(selectedSize ? selectedSize.stock > 0 : selectedProduct.in_stock)
+                                      ? <span className="text-xs text-green-600 bg-green-100 px-2 py-0.5 rounded">{t('combos.inStock')}</span>
+                                      : <span className="text-xs text-red-600 bg-red-100 px-2 py-0.5 rounded">{t('combos.outOfStock')}</span>}
+                                  </div>
+                                  <div className="text-muted-foreground flex gap-4">
+                                    <span>{t('combos.priceLine', {
+                                      price: Number(selectedSize?.price ?? selectedProduct.price).toFixed(2),
+                                    })}</span>
+                                    <span>{t('combos.weightLine', {
+                                      weight: selectedSize?.formatted_weight || selectedProduct.weight,
+                                    })}</span>
+                                    <span>{t('combos.stockLine', {
+                                      stock: selectedSize?.stock ?? selectedProduct.stock,
+                                    })}</span>
+                                  </div>
+                                </div>
                               </div>
-                            </div>
-                          </div>
-                        )}
+                            </>
+                          );
+                        })()}
                       </div>
                       
                       <div className="w-24">
-                        <Label htmlFor={`quantity-${index}`}>Qty</Label>
+                        <Label htmlFor={`quantity-${index}`}>{t('combos.qty')}</Label>
                         <Input
                           id={`quantity-${index}`}
                           type="number"
@@ -707,27 +759,16 @@ const handleToggleStatus = async (combo: Combo) => {
               })}
               
               {formData.items.length === 0 && (
-                <p className="text-sm text-muted-foreground">
-                  No products added. Click "Add Product" to add products to this combo.
-                </p>
+                <p className="text-sm text-muted-foreground">{t('combos.noProductsAdded')}</p>
               )}
               
               {formData.items.length > 0 && (
                 <div className="border-t pt-3 mt-2">
                   <div className="flex justify-between items-center text-sm">
-                    <span className="font-medium">Total Product Value:</span>
-                    <span className="font-mono font-semibold">
-                      ₹{formData.items.reduce((total, item) => {
-                        const product = getProductById(item.product);
-                        if (product)
-                          return total + (Number(product.price) * item.quantity);
-                        return total;
-                      }, 0).toFixed(2)}
-                    </span>
+                    <span className="font-medium">{t('combos.comboMrp')}</span>
+                    <span className="font-mono font-semibold">₹{computedMrp.toFixed(2)}</span>
                   </div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    This is the sum of individual product prices. Set your combo price below.
-                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">{t('combos.comboMrpHint')}</p>
                 </div>
               )}
             </div>
@@ -735,15 +776,11 @@ const handleToggleStatus = async (combo: Combo) => {
             {/* Homepage Sections */}
             <div className="space-y-2 rounded-lg border p-3">
               <div>
-                <Label className="text-base">Homepage Sections</Label>
-                <p className="text-xs text-muted-foreground">
-                  Choose which homepage sections this combo appears in.
-                </p>
+                <Label className="text-base">{t('combos.homepageSections')}</Label>
+                <p className="text-xs text-muted-foreground">{t('combos.homepageSectionsHint')}</p>
               </div>
               {sections.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No sections defined yet. Create sections in the Django admin first.
-                </p>
+                <p className="text-sm text-muted-foreground">{t('combos.noSections')}</p>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {sections.map((section) => (
@@ -759,7 +796,7 @@ const handleToggleStatus = async (combo: Combo) => {
                       />
                       <span className="truncate">{section.name}</span>
                       {!section.is_active && (
-                        <span className="text-xs text-muted-foreground">(inactive)</span>
+                        <span className="text-xs text-muted-foreground">{t('combos.sectionInactive')}</span>
                       )}
                     </label>
                   ))}
@@ -776,7 +813,7 @@ const handleToggleStatus = async (combo: Combo) => {
                   onChange={e => setFormData({ ...formData, is_active: e.target.checked })}
                   className="rounded"
                 />
-                <Label htmlFor="is_active" className="cursor-pointer">Active</Label>
+                <Label htmlFor="is_active" className="cursor-pointer">{t('common.active')}</Label>
               </div>
               <div className="flex items-center space-x-2">
                 <input
@@ -786,16 +823,16 @@ const handleToggleStatus = async (combo: Combo) => {
                   onChange={e => setFormData({ ...formData, is_featured: e.target.checked })}
                   className="rounded"
                 />
-                <Label htmlFor="is_featured" className="cursor-pointer">Featured</Label>
+                <Label htmlFor="is_featured" className="cursor-pointer">{t('combos.featured')}</Label>
               </div>
             </div>
             
             <DialogFooter className="gap-2">
               <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); resetForm(); }}>
-                Cancel
+                {t('common.cancel')}
               </Button>
               <Button type="submit" disabled={submitting}>
-                {submitting ? 'Saving...' : (editingCombo ? 'Update' : 'Create')}
+                {submitting ? t('common.saving') : (editingCombo ? t('combos.update') : t('combos.create'))}
               </Button>
             </DialogFooter>
           </form>

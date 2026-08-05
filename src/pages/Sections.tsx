@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useAdminData } from '@/hooks/useAdminData';
+import { TableSkeleton } from '@/components/TableSkeleton';
 import {
   getSections, createSection, updateSection, hideSection,
   getSectionProducts, setSectionProducts,
@@ -13,23 +15,30 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
 import { Plus, Edit, EyeOff, Eye, ArrowUp, ArrowDown, X, ListOrdered } from 'lucide-react';
+import { PageHelp } from '@/components/PageHelp';
+import { useTranslation } from 'react-i18next';
 
-const SECTION_TYPES = [
-  { value: 'special', label: 'Our Specials' },
-  { value: 'new', label: 'Newly Launched' },
-  { value: 'trending', label: 'Trending Now' },
-  { value: 'bestseller', label: 'Best Sellers' },
-  { value: 'seasonal', label: 'Seasonal' },
-  { value: 'custom', label: 'Custom Section' },
-];
+// The stored value is the API's slug; the label is looked up at render time so
+// switching language re-labels existing sections.
+const SECTION_TYPE_VALUES = [
+  'special', 'new', 'trending', 'bestseller', 'seasonal', 'custom',
+] as const;
 
 const Sections = () => {
-  const [sections, setSections] = useState<ProductSection[]>([]);
-  const [allProducts, setAllProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { t } = useTranslation();
   const { toast } = useToast();
+  const typeLabel = (value: string) =>
+    t(`sections.type.${value}`, { defaultValue: value });
+  // Products are shared with the Products page — same cache key, so opening
+  // this page after that one costs nothing.
+  const { data: allProducts = [] } =
+    useAdminData(['products'], () => getProducts().then(r => r.data));
+  const {
+    data: sections = [], isInitialLoading, refreshing, refetch: fetchAll,
+  } = useAdminData(['sections'], () => getSections());
 
   // Create/edit dialog
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -43,20 +52,6 @@ const Sections = () => {
   const [items, setItems] = useState<SectionProduct[]>([]);
   const [addProductId, setAddProductId] = useState('');
   const [savingOrder, setSavingOrder] = useState(false);
-
-  const fetchAll = async () => {
-    try {
-      const [secs, prods] = await Promise.all([getSections(), getProducts()]);
-      setSections(secs);
-      setAllProducts(prods.data);
-    } catch {
-      toast({ title: 'Error', description: 'Failed to load sections', variant: 'destructive' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { fetchAll(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const openCreate = () => {
     setEditing(null);
@@ -76,7 +71,11 @@ const Sections = () => {
 
   const handleSubmit = async () => {
     if (!formData.name.trim()) {
-      toast({ title: 'Name needed', description: 'Please type a section name first.', variant: 'destructive' });
+      toast({
+        title: t('sections.nameNeededTitle'),
+        description: t('sections.nameNeededBody'),
+        variant: 'destructive',
+      });
       return;
     }
     setSaving(true);
@@ -88,17 +87,25 @@ const Sections = () => {
       };
       if (editing) {
         await updateSection(editing.id, payload);
-        toast({ title: 'Saved', description: `"${payload.name}" updated.` });
+        toast({
+          title: t('sections.savedTitle'),
+          description: t('sections.savedBody', { name: payload.name }),
+        });
       } else {
         await createSection(payload);
-        toast({ title: 'Created', description: `Section "${payload.name}" added to the homepage.` });
+        toast({
+          title: t('sections.createdTitle'),
+          description: t('sections.createdBody', { name: payload.name }),
+        });
       }
       setDialogOpen(false);
       fetchAll();
     } catch (error) {
       toast({
-        title: 'Error',
-        description: error instanceof Error && error.message ? error.message : 'Could not save the section.',
+        title: t('common.error'),
+        description: error instanceof Error && error.message
+          ? error.message
+          : t('sections.saveFailed'),
         variant: 'destructive',
       });
     } finally {
@@ -107,23 +114,37 @@ const Sections = () => {
   };
 
   const handleHide = async (section: ProductSection) => {
-    if (!confirm(`Hide "${section.name}" from the homepage? Its products stay in place — you can show it again any time.`)) return;
+    if (!confirm(t('sections.confirmHide', { name: section.name }))) return;
     try {
       await hideSection(section.id);
-      toast({ title: 'Hidden', description: `"${section.name}" is no longer on the homepage.` });
+      toast({
+        title: t('sections.hiddenTitle'),
+        description: t('sections.hiddenBody', { name: section.name }),
+      });
       fetchAll();
     } catch {
-      toast({ title: 'Error', description: 'Could not hide the section.', variant: 'destructive' });
+      toast({
+        title: t('common.error'),
+        description: t('sections.hideFailed'),
+        variant: 'destructive',
+      });
     }
   };
 
   const handleShow = async (section: ProductSection) => {
     try {
       await updateSection(section.id, { is_active: true });
-      toast({ title: 'Visible again', description: `"${section.name}" is back on the homepage.` });
+      toast({
+        title: t('sections.visibleTitle'),
+        description: t('sections.visibleBody', { name: section.name }),
+      });
       fetchAll();
     } catch {
-      toast({ title: 'Error', description: 'Could not update the section.', variant: 'destructive' });
+      toast({
+        title: t('common.error'),
+        description: t('sections.updateFailed'),
+        variant: 'destructive',
+      });
     }
   };
 
@@ -150,7 +171,10 @@ const Sections = () => {
     const pid = parseInt(addProductId);
     if (!pid) return;
     if (items.some(i => i.id === pid)) {
-      toast({ title: 'Already added', description: 'That product is already in this section.' });
+      toast({
+        title: t('sections.alreadyAddedTitle'),
+        description: t('sections.alreadyAddedBody'),
+      });
       return;
     }
     const p = allProducts.find(pr => pr.id === pid);
@@ -167,12 +191,19 @@ const Sections = () => {
     setSavingOrder(true);
     try {
       await setSectionProducts(arrangeSection.id, items.map(i => i.id));
-      toast({ title: 'Saved', description: `"${arrangeSection.name}" now shows ${items.length} products in this order.` });
+      toast({
+        title: t('sections.savedTitle'),
+        description: t('sections.orderSavedBody', {
+          name: arrangeSection.name, count: items.length,
+        }),
+      });
       setArrangeOpen(false);
     } catch (error) {
       toast({
-        title: 'Error',
-        description: error instanceof Error && error.message ? error.message : 'Could not save the product order.',
+        title: t('common.error'),
+        description: error instanceof Error && error.message
+          ? error.message
+          : t('sections.orderSaveFailed'),
         variant: 'destructive',
       });
     } finally {
@@ -180,29 +211,34 @@ const Sections = () => {
     }
   };
 
-  if (loading) {
-    return <div className="flex items-center justify-center min-h-[400px]">Loading...</div>;
+  if (isInitialLoading) {
+    return (
+      <div className="space-y-6 p-6">
+        <Skeleton className="h-9 w-64" />
+        <TableSkeleton rows={4} columns={2} />
+      </div>
+    );
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className={`space-y-6 p-6 transition-opacity ${refreshing ? 'opacity-60' : 'opacity-100'}`}>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Homepage Sections</h1>
-          <p className="text-muted-foreground">
-            Sections are the product rows on your store's homepage (e.g. Best Sellers).
-          </p>
+          <h1 className="text-3xl font-bold tracking-tight">{t('sections.title')}</h1>
+          <p className="text-muted-foreground">{t('sections.subtitle')}</p>
         </div>
         <Button onClick={openCreate}>
-          <Plus className="mr-2 h-4 w-4" /> Add Section
+          <Plus className="mr-2 h-4 w-4" /> {t('sections.addButton')}
         </Button>
       </div>
+
+      <PageHelp>{t('sections.pageHelp')}</PageHelp>
 
       <div className="grid gap-4 md:grid-cols-2">
         {sections.length === 0 && (
           <Card>
             <CardContent className="py-8 text-center text-muted-foreground">
-              No sections yet. Click "Add Section" to create your first homepage row.
+              {t('sections.empty')}
             </CardContent>
           </Card>
         )}
@@ -212,26 +248,26 @@ const Sections = () => {
               <div>
                 <CardTitle className="text-base">{section.name}</CardTitle>
                 <p className="text-xs text-muted-foreground mt-1">
-                  {SECTION_TYPES.find(t => t.value === section.section_type)?.label || section.section_type}
-                  {' · '}shows up to {section.max_products} products
-                  {!section.is_active && ' · hidden'}
+                  {typeLabel(section.section_type)}
+                  {' · '}{t('sections.showsUpTo', { count: section.max_products })}
+                  {!section.is_active && ` · ${t('sections.hiddenSuffix')}`}
                 </p>
               </div>
             </CardHeader>
             <CardContent className="flex flex-wrap gap-2">
               <Button variant="outline" size="sm" onClick={() => openArrange(section)}>
-                <ListOrdered className="mr-2 h-4 w-4" /> Arrange products
+                <ListOrdered className="mr-2 h-4 w-4" /> {t('sections.arrangeButton')}
               </Button>
               <Button variant="ghost" size="sm" onClick={() => openEdit(section)}>
-                <Edit className="mr-2 h-4 w-4" /> Edit
+                <Edit className="mr-2 h-4 w-4" /> {t('common.edit')}
               </Button>
               {section.is_active ? (
                 <Button variant="ghost" size="sm" className="text-amber-600" onClick={() => handleHide(section)}>
-                  <EyeOff className="mr-2 h-4 w-4" /> Hide
+                  <EyeOff className="mr-2 h-4 w-4" /> {t('sections.hideButton')}
                 </Button>
               ) : (
                 <Button variant="ghost" size="sm" className="text-green-600" onClick={() => handleShow(section)}>
-                  <Eye className="mr-2 h-4 w-4" /> Show
+                  <Eye className="mr-2 h-4 w-4" /> {t('sections.showButton')}
                 </Button>
               )}
             </CardContent>
@@ -243,37 +279,35 @@ const Sections = () => {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{editing ? 'Edit Section' : 'Add Section'}</DialogTitle>
-            <DialogDescription>
-              A section is a row of products on the homepage.
-            </DialogDescription>
+            <DialogTitle>{editing ? t('sections.editTitle') : t('sections.addTitle')}</DialogTitle>
+            <DialogDescription>{t('sections.dialogDescription')}</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <Label htmlFor="sec-name">Name *</Label>
+              <Label htmlFor="sec-name">{t('sections.nameLabel')}</Label>
               <Input
                 id="sec-name"
-                placeholder="e.g. Festival Favourites"
+                placeholder={t('sections.namePlaceholder')}
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
               />
             </div>
             <div>
-              <Label>Type</Label>
+              <Label>{t('sections.typeLabel')}</Label>
               <Select
                 value={formData.section_type}
                 onValueChange={(v) => setFormData({ ...formData, section_type: v })}
               >
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {SECTION_TYPES.map(t => (
-                    <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+                  {SECTION_TYPE_VALUES.map(value => (
+                    <SelectItem key={value} value={value}>{typeLabel(value)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div>
-              <Label htmlFor="sec-max">Maximum products shown</Label>
+              <Label htmlFor="sec-max">{t('sections.maxLabel')}</Label>
               <Input
                 id="sec-max"
                 type="number"
@@ -284,9 +318,9 @@ const Sections = () => {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setDialogOpen(false)}>{t('common.cancel')}</Button>
             <Button onClick={handleSubmit} disabled={saving}>
-              {saving ? 'Saving…' : editing ? 'Save changes' : 'Add section'}
+              {saving ? t('common.saving') : editing ? t('sections.saveChanges') : t('sections.addSubmit')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -296,16 +330,14 @@ const Sections = () => {
       <Dialog open={arrangeOpen} onOpenChange={setArrangeOpen}>
         <DialogContent className="max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Arrange: {arrangeSection?.name}</DialogTitle>
-            <DialogDescription>
-              Use the arrows to change the order customers see. The top product shows first.
-            </DialogDescription>
+            <DialogTitle>{t('sections.arrangeTitle', { name: arrangeSection?.name ?? '' })}</DialogTitle>
+            <DialogDescription>{t('sections.arrangeDescription')}</DialogDescription>
           </DialogHeader>
 
           <div className="flex gap-2">
             <Select value={addProductId} onValueChange={setAddProductId}>
               <SelectTrigger className="flex-1">
-                <SelectValue placeholder="Add a product to this section…" />
+                <SelectValue placeholder={t('sections.addProductPlaceholder')} />
               </SelectTrigger>
               <SelectContent>
                 {allProducts
@@ -315,13 +347,13 @@ const Sections = () => {
                   ))}
               </SelectContent>
             </Select>
-            <Button variant="outline" onClick={addItem} disabled={!addProductId}>Add</Button>
+            <Button variant="outline" onClick={addItem} disabled={!addProductId}>{t('common.add')}</Button>
           </div>
 
           <div className="space-y-1">
             {items.length === 0 && (
               <p className="text-center text-muted-foreground py-6 text-sm">
-                No products in this section yet — add some above.
+                {t('sections.noProducts')}
               </p>
             )}
             {items.map((item, index) => (
@@ -332,7 +364,9 @@ const Sections = () => {
                 )}
                 <span className="flex-1 truncate text-sm font-medium">
                   {item.name}
-                  {!item.is_active && <span className="ml-1 text-xs text-amber-600">(hidden product)</span>}
+                  {!item.is_active && (
+                    <span className="ml-1 text-xs text-amber-600">{t('sections.hiddenProduct')}</span>
+                  )}
                 </span>
                 <Button variant="ghost" size="icon" className="h-7 w-7" disabled={index === 0}
                   onClick={() => move(index, -1)}>
@@ -351,9 +385,9 @@ const Sections = () => {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setArrangeOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setArrangeOpen(false)}>{t('common.cancel')}</Button>
             <Button onClick={saveOrder} disabled={savingOrder}>
-              {savingOrder ? 'Saving…' : 'Save order'}
+              {savingOrder ? t('common.saving') : t('sections.saveOrder')}
             </Button>
           </DialogFooter>
         </DialogContent>

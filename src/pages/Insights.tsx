@@ -6,6 +6,8 @@ import { Mail } from 'lucide-react';
 import { useDateRange } from '@/hooks/useDateRange';
 import { sendReport } from '@/api/dashboard';
 import { useToast } from '@/hooks/use-toast';
+import { PageHelp } from '@/components/PageHelp';
+import { useTranslation } from 'react-i18next';
 import { InsightsToolbar } from '@/components/insights/InsightsToolbar';
 import { OverviewTab } from '@/components/insights/tabs/OverviewTab';
 import { SalesTab } from '@/components/insights/tabs/SalesTab';
@@ -15,6 +17,7 @@ import { CustomersTab } from '@/components/insights/tabs/CustomersTab';
 import { AnonymousTab } from '@/components/insights/tabs/AnonymousTab';
 
 const Insights = () => {
+  const { t } = useTranslation();
   const controls = useDateRange();
   const { range, previousRange, compare } = controls;
   const queryClient = useQueryClient();
@@ -29,11 +32,15 @@ const Insights = () => {
     try {
       await sendReport('weekly');
       toast({
-        title: 'Summary sent',
-        description: 'Check the store email for this week\'s plain-language summary.',
+        title: t('insights.summarySentTitle'),
+        description: t('insights.summarySentBody'),
       });
     } catch {
-      toast({ title: 'Error', description: 'Could not send the summary email.', variant: 'destructive' });
+      toast({
+        title: t('insights.summaryFailedTitle'),
+        description: t('insights.summaryFailedBody'),
+        variant: 'destructive',
+      });
     } finally {
       setSending(false);
     }
@@ -43,26 +50,28 @@ const Insights = () => {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Insights</h1>
-          <p className="text-muted-foreground">Sales and behavioral analytics</p>
+          <h1 className="text-3xl font-bold">{t('insights.title')}</h1>
+          <p className="text-muted-foreground">{t('insights.subtitle')}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" onClick={handleSendSummary} disabled={sending}>
             <Mail className="mr-2 h-4 w-4" />
-            {sending ? 'Sending…' : 'Email me this week\'s summary'}
+            {sending ? t('insights.sending') : t('insights.emailSummary')}
           </Button>
           <InsightsToolbar controls={controls} onRefresh={refresh} />
         </div>
       </div>
 
+      <PageHelp>{t('insights.pageHelp')}</PageHelp>
+
       <Tabs defaultValue="overview">
         <TabsList className="flex-wrap h-auto">
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="sales">Sales</TabsTrigger>
-          <TabsTrigger value="funnel">Funnel</TabsTrigger>
-          <TabsTrigger value="search">Search</TabsTrigger>
-          <TabsTrigger value="customers">Customers</TabsTrigger>
-          <TabsTrigger value="anonymous">Potential Customers</TabsTrigger>
+          <TabsTrigger value="overview">{t('insights.tabs.overview')}</TabsTrigger>
+          <TabsTrigger value="sales">{t('insights.tabs.sales')}</TabsTrigger>
+          <TabsTrigger value="funnel">{t('insights.tabs.funnel')}</TabsTrigger>
+          <TabsTrigger value="search">{t('insights.tabs.search')}</TabsTrigger>
+          <TabsTrigger value="customers">{t('insights.tabs.customers')}</TabsTrigger>
+          <TabsTrigger value="anonymous">{t('insights.tabs.anonymous')}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview"><OverviewTab range={range} /></TabsContent>

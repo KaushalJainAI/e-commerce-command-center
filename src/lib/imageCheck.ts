@@ -3,11 +3,17 @@
  * Non-technical admins often upload tiny WhatsApp thumbnails that look blurry
  * on the storefront. We block truly unusable images and warn on small ones,
  * in plain language.
+ *
+ * The result carries translation KEYS, not sentences: this module has no React
+ * context to call `t` from, and hard-coding English here would leak past the
+ * language switch into a toast the admin can't read.
  */
 export interface ImageCheckResult {
-  ok: boolean;          // false = block the upload
-  warning?: string;     // set when the image is usable but not great
-  error?: string;       // set when ok === false
+  ok: boolean;            // false = block the upload
+  warningKey?: string;    // set when the image is usable but not great
+  errorKey?: string;      // set when ok === false
+  /** Interpolation values for whichever key is set. */
+  params?: Record<string, string | number>;
 }
 
 const MIN_BLOCK_PX = 300;  // below this the image is unusable
@@ -16,7 +22,7 @@ const MIN_WARN_PX = 800;   // below this it may look blurry on product pages
 export const checkImageFile = (file: File): Promise<ImageCheckResult> =>
   new Promise((resolve) => {
     if (!file.type.startsWith('image/')) {
-      resolve({ ok: false, error: 'That file is not an image. Please choose a photo (JPG or PNG).' });
+      resolve({ ok: false, errorKey: 'imageCheck.notAnImage' });
       return;
     }
     const url = URL.createObjectURL(file);
@@ -24,23 +30,18 @@ export const checkImageFile = (file: File): Promise<ImageCheckResult> =>
     img.onload = () => {
       URL.revokeObjectURL(url);
       const smallest = Math.min(img.width, img.height);
+      const params = { width: img.width, height: img.height, min: MIN_WARN_PX };
       if (smallest < MIN_BLOCK_PX) {
-        resolve({
-          ok: false,
-          error: `This photo is too small (${img.width}×${img.height}) and will look blurry. Please use a bigger photo — at least ${MIN_WARN_PX}px wide.`,
-        });
+        resolve({ ok: false, errorKey: 'imageCheck.tooSmall', params });
       } else if (smallest < MIN_WARN_PX) {
-        resolve({
-          ok: true,
-          warning: `This photo is a bit small (${img.width}×${img.height}) and may look soft on big screens. A photo at least ${MIN_WARN_PX}px wide would look better.`,
-        });
+        resolve({ ok: true, warningKey: 'imageCheck.abitSmall', params });
       } else {
         resolve({ ok: true });
       }
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
-      resolve({ ok: false, error: 'Could not read this image file. Please try a different photo.' });
+      resolve({ ok: false, errorKey: 'imageCheck.unreadable' });
     };
     img.src = url;
   });

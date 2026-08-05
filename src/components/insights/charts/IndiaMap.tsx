@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import indiaMap from '@svg-maps/india';
+import { useTranslation } from 'react-i18next';
 import { num } from '../format';
 
 interface Props {
@@ -26,6 +27,7 @@ const normalize = (s: string) => s.trim().toLowerCase();
  * ready-to-render SVG paths.
  */
 export const IndiaMap = ({ values, unit = '' }: Props) => {
+  const { t } = useTranslation();
   const [hover, setHover] = useState<{ name: string; value: number } | null>(null);
 
   const byName = useMemo(() => {
@@ -41,7 +43,7 @@ export const IndiaMap = ({ values, unit = '' }: Props) => {
 
   return (
     <div className="relative h-full w-full">
-      <svg viewBox={indiaMap.viewBox} className="h-full w-full" role="img" aria-label="India choropleth">
+      <svg viewBox={indiaMap.viewBox} className="h-full w-full" role="img" aria-label={t('insights.indiaMapLabel')}>
         {indiaMap.locations.map((loc) => {
           const value = byName[normalize(loc.name)] ?? 0;
           return (

@@ -149,6 +149,67 @@ avoid expensive aggregations on every page load.
 
 ---
 
+## Data Fetching (`hooks/useAdminData.ts`)
+
+Every list page fetches through **`useAdminData(key, fetcher)`** — a thin wrapper over
+React Query. Do not hand-roll `useState` + `useEffect` fetches in a page; they were
+removed because they refetched from scratch on every navigation and blanked the screen
+while doing it.
+
+```typescript
+const { data, isInitialLoading, refreshing, refetch } =
+  useAdminData(['products'], () => getProducts().then(r => r.data));
+```
+
+**The two loading states are not interchangeable:**
+
+| State | Meaning | What to render |
+|-------|---------|----------------|
+| `isInitialLoading` | nothing cached yet | `<TableSkeleton />` in place of the table |
+| `refreshing` | revalidating over data already on screen | dim the table (`opacity-60`) — **never unmount it** |
+
+Returning `<div>Loading...</div>` for the whole page is the anti-pattern this replaced:
+it unmounts the search box mid-keystroke, so the input loses focus and the page reads as
+a spontaneous reload.
+
+**Query defaults** (`App.tsx`): `staleTime` 30 s, `gcTime` 5 min, `refetchOnWindowFocus`
+off, one retry. A shared `QueryCache.onError` toasts load failures once, and only when
+there is no cached data to fall back on.
+
+**Cache keys are shared across pages** — `['products']` is used by Products, Sections,
+Combos and Recycle Bin, so opening one after another costs no request.
+
+⚠️ **Because data is now cached, mutations must invalidate what they affect.** Use
+`useInvalidate()` and list every key the write touches, not just the current page's:
+
+```typescript
+// Saving a product also changes section placements, bulk rows, low-stock counts
+invalidate(['products'], ['sections'], ['bulk-products'], ['dashboard']);
+```
+
+For single-field toggles, patch the cache directly with `queryClient.setQueryData` so the
+row updates instantly instead of refetching the list.
+
+**Searches** debounce through `useDebouncedValue` and put the query in the cache key, so
+responses for a query the admin has already typed past can never overwrite newer results.
+
+---
+
+## Routing & Session
+
+- **All pages below the layout are `lazy()`-loaded** (`App.tsx`), each behind a
+  `<RouteFallback />` Suspense boundary that stays invisible for 150 ms so a cached chunk
+  never flashes a skeleton. Keep new pages lazy — the main bundle is ~435 kB and the one
+  eager exception is Dashboard (the landing screen).
+- **Never navigate with `window.location`.** A 401 is handled in
+  `api/axiosInstance.ts`: it silently calls `/auth/token/refresh/` (single-flight) and
+  replays the original request. Only when that fails does it dispatch
+  `SESSION_EXPIRED_EVENT`, which `AuthContext` turns into a router navigation. A hard
+  assignment to `window.location` throws away filters, dialogs and scroll position — that
+  is what made the panel appear to reload itself once the 1-hour access token expired.
+
+---
+
 ## Page Responsibilities
 
 | Page | Manages |
@@ -164,7 +225,7 @@ avoid expensive aggregations on every page load.
 | Reviews | Review moderation — hide/unhide (`is_hidden`) |
 | Customers | Customer list + per-customer detail (orders, spend) |
 | Recycle Bin | Soft-deleted orders; restore |
-| Coupons | Discount code CRUD |
+| Coupons | Discount code CRUD: % or flat ₹, minimum order, usage cap, and optional restriction to a single customer |
 | Conversations | All customer chat threads (AI + human); admin reply, status management |
 | Contact | Contact form submissions |
 | Admin Info | Admin account settings |
@@ -193,15 +254,25 @@ const buildFormData = () => {
 
 ### Combo Items as JSON
 
-Combo items are serialized as JSON within FormData:
+Combo items are serialized as JSON within FormData. `variant` — the packaging
+SIZE bundled — is the real key; `product` is sent alongside for older backends.
 ```typescript
 form.append('items', JSON.stringify(
   comboItems.map(item => ({
     product: item.productId,
+    variant: item.variantId,
     quantity: item.quantity,
   }))
 ));
 ```
+
+**No `price` is posted.** A combo's MRP is derived server-side as the sum of its
+component sizes' prices, so the form shows it read-only (`computedMrp`, which
+must sum `variant.price` — not `product.price`, a mirror of whichever size is
+default — or the displayed figure won't match what the API returns). The admin
+sets only `discount_price`, the actual selling price, validated client-side to
+be below the MRP. There is no combo GST field: tax is charged per component at
+its own product's rate.
 
 ---
 

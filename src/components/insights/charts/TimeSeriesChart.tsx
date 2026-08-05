@@ -2,6 +2,7 @@ import {
   ResponsiveContainer, ComposedChart, Area, Line, XAxis, YAxis,
   CartesianGrid, Tooltip, Legend, Brush,
 } from 'recharts';
+import { useTranslation } from 'react-i18next';
 import { PALETTE } from '../format';
 
 export interface SeriesPoint { bucket: string; revenue: number; orders: number; units?: number; }
@@ -18,6 +19,7 @@ interface Props {
  * brush for zooming longer ranges.
  */
 export const TimeSeriesChart = ({ data, compareData }: Props) => {
+  const { t } = useTranslation();
   // Align compare series by index so both render on the same X categories.
   const merged = data.map((d, i) => ({
     ...d,
@@ -32,13 +34,13 @@ export const TimeSeriesChart = ({ data, compareData }: Props) => {
         <YAxis yAxisId="right" orientation="right" fontSize={11} />
         <Tooltip />
         <Legend />
-        <Area yAxisId="left" type="monotone" dataKey="revenue" name="Revenue"
+        <Area yAxisId="left" type="monotone" dataKey="revenue" name={t('insights.series.revenue')}
           stroke={PALETTE[0]} fill={PALETTE[0]} fillOpacity={0.15} strokeWidth={2} />
         {compareData && (
-          <Line yAxisId="left" type="monotone" dataKey="prevRevenue" name="Prev revenue"
+          <Line yAxisId="left" type="monotone" dataKey="prevRevenue" name={t('insights.series.prevRevenue')}
             stroke={PALETTE[5]} strokeDasharray="4 4" strokeWidth={1.5} dot={false} />
         )}
-        <Line yAxisId="right" type="monotone" dataKey="orders" name="Orders"
+        <Line yAxisId="right" type="monotone" dataKey="orders" name={t('insights.series.orders')}
           stroke={PALETTE[1]} strokeWidth={2} dot={false} />
         {data.length > 12 && <Brush dataKey="bucket" height={20} stroke={PALETTE[0]} />}
       </ComposedChart>

@@ -34,17 +34,53 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+/**
+ * Broadcast when the session is truly gone (refresh failed). AuthContext listens
+ * and navigates to /login through the router — we must NEVER assign to
+ * window.location here, because that is a full browser reload: the admin loses
+ * their filters, dialogs and scroll position, and it looks like the page
+ * "refreshed itself" mid-typing.
+ */
+export const SESSION_EXPIRED_EVENT = 'admin:session-expired';
+
+// The access cookie lives 1 hour; the refresh cookie 7 days. Any request can be
+// the unlucky one that lands just after expiry (typically a search keystroke),
+// so refresh once and replay it instead of bouncing the admin to /login.
+let refreshInFlight: Promise<void> | null = null;
+
+const refreshSession = () => {
+  if (!refreshInFlight) {
+    // Bare axios, not `api` — a 401 from the refresh call itself must not
+    // recurse back into this interceptor.
+    refreshInFlight = axios
+      .post(`${api.defaults.baseURL}/auth/token/refresh/`, {}, { withCredentials: true })
+      .then(() => undefined)
+      .finally(() => { refreshInFlight = null; });
+  }
+  return refreshInFlight;
+};
+
 // Handle auth errors and smartly parse backend form validations
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     if (error.response) {
-      if (error.response.status === 401 || error.response.status === 403) {
-        localStorage.removeItem('admin_token');
-        localStorage.removeItem('refresh_token');
-      }
-      if (error.response.status === 401 && !window.location.pathname.includes('/login')) {
-        window.location.href = '/panel/login';
+      const original = error.config || {};
+      const isAuthCall = typeof original.url === 'string' && original.url.includes('/auth/');
+      const onLoginPage = window.location.pathname.includes('/login');
+
+      if (error.response.status === 401 && !original._retried && !isAuthCall && !onLoginPage) {
+        original._retried = true;
+        try {
+          await refreshSession();
+          return api(original); // replay the original request transparently
+        } catch {
+          localStorage.removeItem('admin_token');
+          localStorage.removeItem('refresh_token');
+          window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+        }
+      } else if (error.response.status === 401 && !onLoginPage && !isAuthCall) {
+        window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
       }
 
       // Check if there is data on the response and smartly parse it

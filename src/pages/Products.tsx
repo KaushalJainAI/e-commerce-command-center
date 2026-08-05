@@ -1,4 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useAdminData, useInvalidate } from '@/hooks/useAdminData';
+import { TableSkeleton } from '@/components/TableSkeleton';
 import { useSearchParams } from 'react-router-dom';
 import {
   getProducts, getProduct, createProduct, updateProduct, updateProductSections, Product, ProductImage,
@@ -7,6 +10,7 @@ import {
 } from '@/api/products';
 import { getCategories, Category } from '@/api/categories';
 import { getSections, ProductSection } from '@/api/sections';
+import { getHsnReference, HsnCode } from '@/api/gst';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -19,6 +23,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Plus, Edit, ToggleLeft, ToggleRight, X, ImagePlus, Loader2, Trash2, Search, Copy } from 'lucide-react';
 import { checkImageFile } from '@/lib/imageCheck';
 import { PageHelp } from '@/components/PageHelp';
+import { useTranslation } from 'react-i18next';
 
 const UNIT_OPTIONS = ['g', 'kg', 'ml', 'l', 'pc', 'box', 'pack'];
 
@@ -42,12 +47,24 @@ const blankVariantRow = (is_default = false): VariantRow => ({
 });
 
 const Products = () => {
-  const [products, setProducts] = useState<Product[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [sections, setSections] = useState<ProductSection[]>([]);
+  const { t } = useTranslation();
+  const queryClient = useQueryClient();
+  const invalidate = useInvalidate();
+  // Four independent caches: the catalog is shared with Sections/RecycleBin,
+  // while categories/sections/spice-forms are near-static reference data that
+  // no longer refetch every time this page is opened.
+  const {
+    data: products = [], isInitialLoading, refreshing, refetch: fetchProducts,
+  } = useAdminData(['products'], () => getProducts().then(r => r.data || []));
+  const { data: categories = [] } =
+    useAdminData(['categories'], () => getCategories().then(r => r.data || []));
+  const { data: sections = [] } = useAdminData(['sections'], () => getSections());
+  const { data: spiceForms = [] } = useAdminData(['spice-forms'], () => getSpiceForms());
+  // Static reference data (the curated HSN code list + the statutory rate for
+  // each). Cached like the other near-static lookups — it changes when the law
+  // changes, not when the catalogue does.
+  const { data: hsnRef } = useAdminData(['hsn-reference'], () => getHsnReference());
   const [selectedSections, setSelectedSections] = useState<number[]>([]);
-  const [spiceForms, setSpiceForms] = useState<{ value: string; label: string }[]>([]);
-  const [loading, setLoading] = useState(true);
   // The dashboard's "Restock products" button deep-links to /products?stock=low.
   const [searchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState(() => searchParams.get('search') || '');
@@ -56,7 +73,7 @@ const Products = () => {
     const s = searchParams.get('stock');
     return s === 'low' || s === 'out' ? s : 'all';
   });
-  const [sortBy, setSortBy] = useState<'newest' | 'name' | 'priceLow' | 'priceHigh' | 'stockLow'>('newest');
+  const [sortBy, setSortBy] = useState<'newest' | 'name' | 'priceLow' | 'priceHigh' | 'stockLow'>('name');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [formData, setFormData] = useState({
@@ -66,7 +83,8 @@ const Products = () => {
     spice_form: '',
     price: '',
     discount_price: '',
-    tax_rate: '0',
+    tax_rate: '5',
+    hsn_code: '',
     stock: '',
     low_stock_threshold: '5',
     weight: '',
@@ -93,49 +111,26 @@ const Products = () => {
 
   const { toast } = useToast();
 
-  useEffect(() => {
-    const init = async () => {
-      try {
-        const [productsRes, categoriesRes, spiceFormsRes, sectionsRes] = await Promise.all([
-          getProducts(),
-          getCategories(),
-          getSpiceForms(),
-          getSections(),
-        ]);
-        setProducts(productsRes.data || []);
-        setCategories(categoriesRes.data || []);
-        setSpiceForms(spiceFormsRes || []);
-        setSections(sectionsRes || []);
-      } catch {
-        toast({
-          title: 'Error',
-          description: 'Failed to load products or categories',
-          variant: 'destructive',
-        });
-      } finally {
-        setLoading(false);
-      }
-    };
-    init();
-  }, [toast]);
-
-  const fetchProducts = async () => {
-    try {
-      const response = await getProducts();
-      setProducts(response.data || []);
-    } catch {
-      toast({
-        title: 'Error',
-        description: 'Failed to load products',
-        variant: 'destructive',
-      });
-    }
-  };
+  /** Patch one product's active flag in the cached list (optimistic + revert). */
+  const setProductActive = (id: number, isActive: boolean) =>
+    queryClient.setQueryData(['products'], (prev: Product[] | undefined) =>
+      prev?.map(p => (p.id === id ? { ...p, is_active: isActive } : p)));
 
   const parseNumberOrZero = (value: string) => {
     const n = parseFloat(value);
     return Number.isNaN(n) ? 0 : n;
   };
+
+  // ---- GST classification helpers ----
+  // The reference row for whatever code is currently typed/selected, and the
+  // statutory rate that goes with it. Both are ADVISORY: the admin types the
+  // rate, this only makes a disagreement visible. Auto-applying it would change
+  // how every future invoice splits the price, silently.
+  const hsnCodes: HsnCode[] = hsnRef?.codes ?? [];
+  const selectedHsn = hsnCodes.find(c => c.code === (formData.hsn_code || '').trim());
+  const enteredRate = parseFloat(formData.tax_rate);
+  const rateDiffers =
+    !!selectedHsn && Number.isFinite(enteredRate) && enteredRate !== selectedHsn.gst_rate;
 
   const toggleSection = (sectionId: number) => {
     setSelectedSections((prev) =>
@@ -190,9 +185,13 @@ const Products = () => {
     // Per-product low-stock alert level (emails the admin when stock falls to
     // or below this). Product-level threshold; sizes can have their own too.
     form.append('low_stock_threshold', String(parseInt(formData.low_stock_threshold ?? '5') || 0));
-    // Per-product GST rate (%). Frontend default is 0; set per product
-    // (e.g. 5 for taxable goods, 0 for papad / papad katran).
-    form.append('tax_rate', String(parseNumberOrZero(formData.tax_rate || '0')));
+    // Per-product GST rate (%), matching the backend model default of 5. Prices
+    // are GST-INCLUSIVE, so this only splits the price on the invoice — it never
+    // changes what the customer pays. 0 for exempt goods (papad / papad katran).
+    form.append('tax_rate', String(parseNumberOrZero(formData.tax_rate || '5')));
+    // Sent even when blank, so an admin can CLEAR a code they decided was wrong.
+    // Blank is a meaningful value here ("not classified yet"), not a no-op.
+    form.append('hsn_code', (formData.hsn_code || '').trim());
     form.append('weight', String(parseNumberOrZero(def?.weight ?? '0')));
     form.append('unit', def?.unit || 'g');
     if (formData.origin_country) form.append('origin_country', formData.origin_country);
@@ -206,7 +205,7 @@ const Products = () => {
   };
 
   const syncVariants = async (productId: number) => {
-    // Deletions first (returns 200 when a size is kept-but-deactivated due to orders)
+    // Removals first — the API retires the size, it never deletes the row
     for (const id of removedVariantIds) {
       try { await deleteProductVariant(id); } catch { /* ignore individual failures */ }
     }
@@ -233,14 +232,16 @@ const Products = () => {
     }
   };
 
+  /** Returns a translation KEY, not a sentence, so the caller renders it in
+   *  whichever language is active when the toast fires. */
   const validateVariants = (): string | null => {
     const active = variantRows.filter(r => r.is_active);
-    if (active.length === 0) return 'Add at least one packaging size.';
+    if (active.length === 0) return 'products.needOneSize';
     for (const r of active) {
-      if (!(parseNumberOrZero(r.weight) > 0)) return 'Each size needs a weight greater than 0.';
-      if (!(parseNumberOrZero(r.price) > 0)) return 'Each size needs a price greater than 0.';
+      if (!(parseNumberOrZero(r.weight) > 0)) return 'products.needWeight';
+      if (!(parseNumberOrZero(r.price) > 0)) return 'products.needPrice';
       if (r.discount_price && parseNumberOrZero(r.discount_price) >= parseNumberOrZero(r.price))
-        return 'Discount price must be less than the price for every size.';
+        return 'products.discountTooHigh';
     }
     return null;
   };
@@ -248,13 +249,21 @@ const Products = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const sizeError = validateVariants();
-    if (sizeError) {
-      toast({ title: 'Check packaging sizes', description: sizeError, variant: 'destructive' });
+    const sizeErrorKey = validateVariants();
+    if (sizeErrorKey) {
+      toast({
+        title: t('products.checkSizesTitle'),
+        description: t(sizeErrorKey),
+        variant: 'destructive',
+      });
       return;
     }
     if (!editingProduct && !imageFile) {
-      toast({ title: 'Image Required', description: 'Please upload a product image for new products.', variant: 'destructive' });
+      toast({
+        title: t('products.imageRequiredTitle'),
+        description: t('products.imageRequiredBody'),
+        variant: 'destructive',
+      });
       return;
     }
 
@@ -289,15 +298,20 @@ const Products = () => {
         await uploadGalleryImages(productId);
       }
 
-      toast({ title: 'Success', description: editingProduct ? 'Product updated successfully' : 'Product created successfully' });
+      toast({
+        title: t('products.successTitle'),
+        description: editingProduct ? t('products.updatedBody') : t('products.createdBody'),
+      });
       setDialogOpen(false);
       resetForm();
-      fetchProducts();
+      // Saving a product can change its sections and its stock, so the pages
+      // built on those (Sections, Bulk edit, dashboard low-stock) go stale too.
+      invalidate(['products'], ['sections'], ['bulk-products'], ['dashboard']);
     } catch (error: any) {
       console.error('Submit error:', error);
       toast({
-        title: 'Error',
-        description: error.message || 'Failed to save product',
+        title: t('common.error'),
+        description: error.message || t('products.saveFailed'),
         variant: 'destructive',
       });
     } finally {
@@ -309,12 +323,9 @@ const Products = () => {
     const newStatus = !product.is_active;
     
     // Optimistic update - update UI immediately
-    setProducts(prevProducts => 
-      prevProducts.map(p => 
-        p.id === product.id ? { ...p, is_active: newStatus } : p
-      )
-    );
-    
+    setProductActive(product.id, newStatus);
+
+
     try {
       // Create FormData for the update
       const formData = new FormData();
@@ -322,8 +333,8 @@ const Products = () => {
       
       await updateProduct(product.slug, formData);
       toast({
-        title: 'Success',
-        description: `Product marked as ${newStatus ? 'active' : 'inactive'}`,
+        title: t('products.successTitle'),
+        description: newStatus ? t('products.markedActive') : t('products.markedInactive'),
       });
       
       // Also update editingProduct if it's the same product being edited
@@ -335,15 +346,12 @@ const Products = () => {
       console.error('Toggle error:', error);
       
       // Revert optimistic update on error
-      setProducts(prevProducts => 
-        prevProducts.map(p => 
-          p.id === product.id ? { ...p, is_active: !newStatus } : p
-        )
-      );
-      
+      setProductActive(product.id, !newStatus);
+
+
       toast({
-        title: 'Error',
-        description: error.message || 'Failed to update product status',
+        title: t('common.error'),
+        description: error.message || t('products.statusFailed'),
         variant: 'destructive',
       });
     }
@@ -361,7 +369,8 @@ const Products = () => {
         spice_form: fullProduct.spice_form || '',
         price: fullProduct.price !== undefined && fullProduct.price !== null ? String(fullProduct.price) : '',
         discount_price: fullProduct.discount_price !== undefined && fullProduct.discount_price !== null ? String(fullProduct.discount_price) : '',
-        tax_rate: fullProduct.tax_rate !== undefined && fullProduct.tax_rate !== null ? String(fullProduct.tax_rate) : '0',
+        tax_rate: fullProduct.tax_rate !== undefined && fullProduct.tax_rate !== null ? String(fullProduct.tax_rate) : '5',
+        hsn_code: fullProduct.hsn_code || '',
         stock: String(fullProduct.stock ?? 0),
         low_stock_threshold: fullProduct.low_stock_threshold != null ? String(fullProduct.low_stock_threshold) : '5',
         weight: fullProduct.weight !== undefined && fullProduct.weight !== null ? String(fullProduct.weight) : '',
@@ -416,8 +425,8 @@ const Products = () => {
       setDialogOpen(true);
     } catch {
       toast({
-        title: 'Error',
-        description: 'Failed to load product details',
+        title: t('common.error'),
+        description: t('products.loadDetailsFailed'),
         variant: 'destructive',
       });
       setEditingProduct(null);
@@ -433,7 +442,10 @@ const Products = () => {
       spice_form: '',
       price: '',
       discount_price: '',
-      tax_rate: '0',
+      tax_rate: '5',
+      // Must be reset explicitly: omitting it left the previous product's HSN
+      // code sitting in the form when "Add Product" was opened after an edit.
+      hsn_code: '',
       stock: '',
       low_stock_threshold: '5',
       weight: '',
@@ -461,12 +473,19 @@ const Products = () => {
     if (!file) return;
     const check = await checkImageFile(file);
     if (!check.ok) {
-      toast({ title: 'Photo problem', description: check.error, variant: 'destructive' });
+      toast({
+        title: t('imageCheck.problemTitle'),
+        description: t(check.errorKey!, check.params),
+        variant: 'destructive',
+      });
       e.target.value = '';
       return;
     }
-    if (check.warning) {
-      toast({ title: 'Small photo', description: check.warning });
+    if (check.warningKey) {
+      toast({
+        title: t('imageCheck.smallTitle'),
+        description: t(check.warningKey, check.params),
+      });
     }
     setImageFile(file);
     setImagePreview(URL.createObjectURL(file));
@@ -480,13 +499,14 @@ const Products = () => {
       const fullProduct = await getProduct(product.slug);
       resetForm();
       setFormData({
-        name: `${fullProduct.name} (copy)`,
+        name: `${fullProduct.name}${t('products.copySuffix')}`,
         description: fullProduct.description || '',
         category: String(fullProduct.category),
         spice_form: fullProduct.spice_form || '',
         price: fullProduct.price != null ? String(fullProduct.price) : '',
         discount_price: fullProduct.discount_price != null ? String(fullProduct.discount_price) : '',
-        tax_rate: fullProduct.tax_rate != null ? String(fullProduct.tax_rate) : '0',
+        tax_rate: fullProduct.tax_rate != null ? String(fullProduct.tax_rate) : '5',
+        hsn_code: fullProduct.hsn_code || '',
         stock: '0',
         low_stock_threshold: fullProduct.low_stock_threshold != null ? String(fullProduct.low_stock_threshold) : '5',
         weight: fullProduct.weight != null ? String(fullProduct.weight) : '',
@@ -500,11 +520,15 @@ const Products = () => {
       });
       setDialogOpen(true);
       toast({
-        title: 'Copy ready',
-        description: 'Details copied. Change the name, add photos, then save. The copy starts hidden.',
+        title: t('products.copyReadyTitle'),
+        description: t('products.copyReadyBody'),
       });
     } catch {
-      toast({ title: 'Error', description: 'Failed to load product details', variant: 'destructive' });
+      toast({
+        title: t('common.error'),
+        description: t('products.loadDetailsFailed'),
+        variant: 'destructive',
+      });
     }
   };
 
@@ -517,11 +541,18 @@ const Products = () => {
     for (const file of Array.from(files)) {
       const check = await checkImageFile(file);
       if (!check.ok) {
-        toast({ title: 'Photo skipped', description: check.error, variant: 'destructive' });
+        toast({
+          title: t('imageCheck.skippedTitle'),
+          description: t(check.errorKey!, check.params),
+          variant: 'destructive',
+        });
         continue;
       }
-      if (check.warning) {
-        toast({ title: 'Small photo', description: check.warning });
+      if (check.warningKey) {
+        toast({
+          title: t('imageCheck.smallTitle'),
+          description: t(check.warningKey, check.params),
+        });
       }
       accepted.push({ file, preview: URL.createObjectURL(file) });
     }
@@ -542,11 +573,11 @@ const Products = () => {
     try {
       await deleteProductImage(imageId);
       setGalleryImages(prev => prev.filter(img => img.id !== imageId));
-      toast({ title: 'Success', description: 'Gallery image deleted' });
+      toast({ title: t('products.successTitle'), description: t('products.galleryDeleted') });
     } catch {
       toast({
-        title: 'Error',
-        description: 'Failed to delete gallery image',
+        title: t('common.error'),
+        description: t('products.galleryDeleteFailed'),
         variant: 'destructive',
       });
     }
@@ -560,11 +591,14 @@ const Products = () => {
       for (const img of newGalleryImages) {
         await createProductImage(productId, img.file, '');
       }
-      toast({ title: 'Success', description: `${newGalleryImages.length} gallery image(s) uploaded` });
+      toast({
+        title: t('products.successTitle'),
+        description: t('products.galleryUploaded', { count: newGalleryImages.length }),
+      });
     } catch {
       toast({
-        title: 'Error',
-        description: 'Some gallery images failed to upload',
+        title: t('common.error'),
+        description: t('products.galleryUploadFailed'),
         variant: 'destructive',
       });
     } finally {
@@ -610,37 +644,28 @@ const Products = () => {
     return sorted;
   }, [products, searchQuery, filterCategory, filterStock, sortBy]);
 
-  if (loading) {
-    return <div className="flex items-center justify-center min-h-[400px]">Loading...</div>;
-  }
-
   return (
     <div className="space-y-6 p-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Products</h1>
-          <p className="text-muted-foreground">Manage your product inventory</p>
+          <h1 className="text-3xl font-bold tracking-tight">{t('products.title')}</h1>
+          <p className="text-muted-foreground">{t('products.subtitle')}</p>
         </div>
         <Button onClick={() => { resetForm(); setDialogOpen(true); }}>
-          <Plus className="mr-2 h-4 w-4" /> Add Product
+          <Plus className="mr-2 h-4 w-4" /> {t('products.addButton')}
         </Button>
       </div>
 
-      <PageHelp>
-        This is your full product list. Use the search and filters to find a product,
-        then tap the pencil to edit it. The copy icon starts a new product from an
-        existing one. To change many prices or stock levels at once, use the
-        "Bulk Price &amp; Stock" page.
-      </PageHelp>
+      <PageHelp>{t('products.pageHelp')}</PageHelp>
 
       <Card>
         <CardHeader>
-          <CardTitle>All Products</CardTitle>
+          <CardTitle>{t('products.allProducts')}</CardTitle>
           <div className="flex flex-col sm:flex-row gap-2 pt-2">
             <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Search by name or category…"
+                placeholder={t('products.searchPlaceholder')}
                 className="pl-8"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -648,10 +673,10 @@ const Products = () => {
             </div>
             <Select value={filterCategory} onValueChange={setFilterCategory}>
               <SelectTrigger className="w-full sm:w-44">
-                <SelectValue placeholder="All categories" />
+                <SelectValue placeholder={t('products.allCategories')} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All categories</SelectItem>
+                <SelectItem value="all">{t('products.allCategories')}</SelectItem>
                 {categories.map(c => (
                   <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
                 ))}
@@ -659,40 +684,44 @@ const Products = () => {
             </Select>
             <Select value={filterStock} onValueChange={(v) => setFilterStock(v as typeof filterStock)}>
               <SelectTrigger className="w-full sm:w-40">
-                <SelectValue placeholder="Stock" />
+                <SelectValue placeholder={t('products.stockFilter')} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Any stock</SelectItem>
-                <SelectItem value="low">Low stock</SelectItem>
-                <SelectItem value="out">Out of stock</SelectItem>
+                <SelectItem value="all">{t('products.anyStock')}</SelectItem>
+                <SelectItem value="low">{t('products.lowStock')}</SelectItem>
+                <SelectItem value="out">{t('products.outOfStock')}</SelectItem>
               </SelectContent>
             </Select>
             <Select value={sortBy} onValueChange={(v) => setSortBy(v as typeof sortBy)}>
               <SelectTrigger className="w-full sm:w-44">
-                <SelectValue placeholder="Sort" />
+                <SelectValue placeholder={t('products.sort')} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="newest">Newest first</SelectItem>
-                <SelectItem value="name">Name A–Z</SelectItem>
-                <SelectItem value="priceLow">Price: low to high</SelectItem>
-                <SelectItem value="priceHigh">Price: high to low</SelectItem>
-                <SelectItem value="stockLow">Stock: lowest first</SelectItem>
+                <SelectItem value="newest">{t('products.sortNewest')}</SelectItem>
+                <SelectItem value="name">{t('products.sortName')}</SelectItem>
+                <SelectItem value="priceLow">{t('products.sortPriceLow')}</SelectItem>
+                <SelectItem value="priceHigh">{t('products.sortPriceHigh')}</SelectItem>
+                <SelectItem value="stockLow">{t('products.sortStockLow')}</SelectItem>
               </SelectContent>
             </Select>
           </div>
         </CardHeader>
-        <CardContent className="overflow-x-auto">
+        <CardContent
+          className={`overflow-x-auto transition-opacity ${refreshing ? 'opacity-60' : 'opacity-100'}`}
+        >
+          {isInitialLoading ? <TableSkeleton rows={8} columns={6} /> : (
+          <>
           <Table className="min-w-[600px]">
             <TableHeader>
               <TableRow>
-                <TableHead>Image</TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Price</TableHead>
-                <TableHead>Weight</TableHead>
-                <TableHead>Stock</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead>{t('common.image')}</TableHead>
+                <TableHead>{t('common.name')}</TableHead>
+                <TableHead>{t('common.category')}</TableHead>
+                <TableHead>{t('common.price')}</TableHead>
+                <TableHead>{t('products.colWeight')}</TableHead>
+                <TableHead>{t('common.stock')}</TableHead>
+                <TableHead>{t('common.status')}</TableHead>
+                <TableHead className="text-right">{t('common.actions')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -700,8 +729,8 @@ const Products = () => {
                 <TableRow>
                   <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
                     {products.length === 0
-                      ? 'No products yet. Click "Add Product" to create your first one.'
-                      : 'No products match your search or filters.'}
+                      ? t('products.emptyNoProducts')
+                      : t('products.emptyNoMatch')}
                   </TableCell>
                 </TableRow>
               )}
@@ -734,7 +763,9 @@ const Products = () => {
                     <TableCell className="font-mono text-muted-foreground">
                       <div>{product.weight ? `${product.weight}${product.unit || ''}` : '—'}</div>
                       {product.variant_count && product.variant_count > 1 ? (
-                        <div className="text-[10px] text-primary font-sans">{product.variant_count} sizes</div>
+                        <div className="text-[10px] text-primary font-sans">
+                          {t('products.sizesCount', { count: product.variant_count })}
+                        </div>
                       ) : null}
                     </TableCell>
                     <TableCell>
@@ -744,7 +775,9 @@ const Products = () => {
                           : 'text-green-600'
                       }>
                         {product.stock || 0}
-                        {!product.stock ? ' (out)' : isLowStock(product) ? ' (low)' : ''}
+                        {!product.stock
+                          ? t('products.outSuffix')
+                          : isLowStock(product) ? t('products.lowSuffix') : ''}
                       </span>
                     </TableCell>
                     <TableCell>
@@ -755,7 +788,7 @@ const Products = () => {
                             : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
                         }`
                       }>
-                        {product.is_active ? 'Active' : 'Inactive'}
+                        {product.is_active ? t('common.active') : t('common.inactive')}
                       </span>
                     </TableCell>
                     <TableCell className="text-right space-x-1">
@@ -763,7 +796,7 @@ const Products = () => {
                         variant="ghost" 
                         size="icon" 
                         onClick={() => openEditDialog(product)}
-                        title="Edit product"
+                        title={t('products.editTooltip')}
                       >
                         <Edit className="h-4 w-4" />
                       </Button>
@@ -771,7 +804,7 @@ const Products = () => {
                         variant="ghost"
                         size="icon"
                         onClick={() => openDuplicateDialog(product)}
-                        title="Duplicate — start a new product from this one"
+                        title={t('products.duplicateTooltip')}
                       >
                         <Copy className="h-4 w-4" />
                       </Button>
@@ -779,7 +812,9 @@ const Products = () => {
                         variant="ghost"
                         size="icon"
                         onClick={() => handleToggleStatus(product)}
-                        title={product.is_active ? 'Deactivate product' : 'Activate product'}
+                        title={product.is_active
+                          ? t('products.deactivateTooltip')
+                          : t('products.activateTooltip')}
                         className={
                           product.is_active
                             ? 'hover:bg-green-500/10 text-green-600 hover:text-green-700'
@@ -798,8 +833,10 @@ const Products = () => {
           </Table>
           {products.length === 0 && (
             <div className="text-center py-12">
-              <p className="text-muted-foreground">No products found.</p>
+              <p className="text-muted-foreground">{t('products.noneFound')}</p>
             </div>
+          )}
+          </>
           )}
         </CardContent>
       </Card>
@@ -813,9 +850,9 @@ const Products = () => {
       >
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editingProduct ? 'Edit Product' : 'Add New Product'}</DialogTitle>
+            <DialogTitle>{editingProduct ? t('products.editTitle') : t('products.addTitle')}</DialogTitle>
             <DialogDescription>
-              {editingProduct ? 'Update product information' : 'Create a new product'}
+              {editingProduct ? t('products.editDescription') : t('products.addDescription')}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -824,11 +861,13 @@ const Products = () => {
                 {imagePreview ? (
                   <img src={imagePreview} alt="Product" className="h-full w-full object-cover" />
                 ) : (
-                  <span className="text-xs text-muted-foreground text-center px-2">No image</span>
+                  <span className="text-xs text-muted-foreground text-center px-2">
+                    {t('products.noImage')}
+                  </span>
                 )}
               </div>
                <div className="space-y-1">
-                <Label htmlFor="image">Product image {!editingProduct && '*'}</Label>
+                <Label htmlFor="image">{t('products.productImage')} {!editingProduct && '*'}</Label>
                 <Input
                   id="image"
                   type="file"
@@ -837,30 +876,30 @@ const Products = () => {
                   className="cursor-pointer"
                   required={!editingProduct}
                 />
-                <p className="text-xs text-muted-foreground">Upload a clear product image.</p>
+                <p className="text-xs text-muted-foreground">{t('products.imageHint')}</p>
               </div>
             </div>
 
             <div className="grid grid-cols-1 gap-4">
               <div>
-                <Label htmlFor="name">Name *</Label>
+                <Label htmlFor="name">{t('products.nameLabel')}</Label>
                 <Input
                   id="name"
                   value={formData.name}
                   onChange={e => setFormData({ ...formData, name: e.target.value })}
                   required
-                  placeholder="Product name"
+                  placeholder={t('products.namePlaceholder')}
                 />
               </div>
             </div>
 
             <div>
-              <Label htmlFor="description">Description *</Label>
+              <Label htmlFor="description">{t('products.descriptionLabel')}</Label>
               <Textarea
                 id="description"
                 value={formData.description}
                 onChange={e => setFormData({ ...formData, description: e.target.value })}
-                placeholder="Product description"
+                placeholder={t('products.descriptionPlaceholder')}
                 rows={3}
                 required
               />
@@ -868,13 +907,13 @@ const Products = () => {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="category">Category *</Label>
+                <Label htmlFor="category">{t('products.categoryLabel')}</Label>
                 <Select
                   value={formData.category}
                   onValueChange={value => setFormData({ ...formData, category: value })}
                 >
                   <SelectTrigger id="category">
-                    <SelectValue placeholder="Select category" />
+                    <SelectValue placeholder={t('products.selectCategory')} />
                   </SelectTrigger>
                   <SelectContent>
                     {categories.map(category => (
@@ -887,13 +926,13 @@ const Products = () => {
               </div>
 
               <div>
-                <Label htmlFor="spice_form">Spice Form *</Label>
+                <Label htmlFor="spice_form">{t('products.spiceFormLabel')}</Label>
                 <Select
                   value={formData.spice_form}
                   onValueChange={value => setFormData({ ...formData, spice_form: value })}
                 >
                   <SelectTrigger id="spice_form">
-                    <SelectValue placeholder="Select form" />
+                    <SelectValue placeholder={t('products.selectForm')} />
                   </SelectTrigger>
                   <SelectContent>
                     {spiceForms.map(formChoice => (
@@ -910,13 +949,15 @@ const Products = () => {
             <div className="space-y-3 rounded-lg border p-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <Label className="text-base">Packaging Sizes</Label>
+                  <Label className="text-base">{t('products.packagingSizes')}</Label>
                   <p className="text-xs text-muted-foreground">
-                    Each size is sold separately. Pick one as the default (shown first / used for the "from" price).
+                    {t('products.packagingHintPrefix')}
+                    <strong>{t('products.packagingHintStrong')}</strong>
+                    {t('products.packagingHintSuffix')}
                   </p>
                 </div>
                 <Button type="button" variant="outline" size="sm" onClick={addVariantRow}>
-                  <Plus className="mr-2 h-4 w-4" /> Add Size
+                  <Plus className="mr-2 h-4 w-4" /> {t('products.addSize')}
                 </Button>
               </div>
 
@@ -927,53 +968,53 @@ const Products = () => {
                     className={`grid grid-cols-12 gap-2 items-end rounded-md border p-2 ${row.is_active ? '' : 'opacity-60'}`}
                   >
                     <div className="col-span-3 sm:col-span-2">
-                      <Label className="text-xs">Weight</Label>
+                      <Label className="text-xs">{t('products.weight')}</Label>
                       <Input type="number" step="0.01" min="0" value={row.weight}
                         onChange={e => updateVariantRow(row.key, { weight: e.target.value })}
-                        placeholder="e.g. 100" />
+                        placeholder={t('products.weightPlaceholder')} />
                     </div>
                     <div className="col-span-3 sm:col-span-2">
-                      <Label className="text-xs">Unit</Label>
+                      <Label className="text-xs">{t('products.unit')}</Label>
                       <Select value={row.unit} onValueChange={v => updateVariantRow(row.key, { unit: v })}>
-                        <SelectTrigger><SelectValue placeholder="Unit" /></SelectTrigger>
+                        <SelectTrigger><SelectValue placeholder={t('products.unit')} /></SelectTrigger>
                         <SelectContent>
                           {UNIT_OPTIONS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
                         </SelectContent>
                       </Select>
                     </div>
                     <div className="col-span-3 sm:col-span-2">
-                      <Label className="text-xs">Price</Label>
+                      <Label className="text-xs">{t('products.price')}</Label>
                       <Input type="number" step="0.01" min="0" value={row.price}
                         onChange={e => updateVariantRow(row.key, { price: e.target.value })}
                         placeholder="0.00" />
                     </div>
                     <div className="col-span-3 sm:col-span-2">
-                      <Label className="text-xs">Discount</Label>
+                      <Label className="text-xs">{t('products.discountedPrice')}</Label>
                       <Input type="number" step="0.01" min="0" value={row.discount_price}
                         onChange={e => updateVariantRow(row.key, { discount_price: e.target.value })}
                         placeholder="—" />
                     </div>
                     <div className="col-span-3 sm:col-span-2">
-                      <Label className="text-xs">Stock</Label>
+                      <Label className="text-xs">{t('products.stock')}</Label>
                       <Input type="number" min="0" value={row.stock}
                         onChange={e => updateVariantRow(row.key, { stock: e.target.value })}
                         placeholder="0" />
                     </div>
                     <div className="col-span-6 sm:col-span-2 flex items-center gap-3 pb-2 flex-wrap">
-                      <label className="flex items-center gap-1 text-xs cursor-pointer" title="Default size">
+                      <label className="flex items-center gap-1 text-xs cursor-pointer" title={t('products.defaultSize')}>
                         <input type="radio" name="default-variant" checked={row.is_default}
                           onChange={() => setDefaultRow(row.key)} />
-                        Default
+                        {t('products.default')}
                       </label>
-                      <label className="flex items-center gap-1 text-xs cursor-pointer" title="Active / visible">
+                      <label className="flex items-center gap-1 text-xs cursor-pointer" title={t('products.activeVisible')}>
                         <input type="checkbox" checked={row.is_active}
                           onChange={e => updateVariantRow(row.key, { is_active: e.target.checked })} />
-                        Active
+                        {t('products.active')}
                       </label>
                       <Button type="button" variant="ghost" size="icon" className="ml-auto"
                         onClick={() => removeVariantRow(row.key)}
                         disabled={variantRows.length <= 1}
-                        title="Remove size">
+                        title={t('products.removeSize')}>
                         <Trash2 className="h-4 w-4 text-destructive" />
                       </Button>
                     </div>
@@ -984,7 +1025,7 @@ const Products = () => {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="origin_country">Origin Country</Label>
+                <Label htmlFor="origin_country">{t('products.originCountry')}</Label>
                 <Input
                   id="origin_country"
                   value={formData.origin_country}
@@ -994,7 +1035,7 @@ const Products = () => {
               </div>
 
               <div>
-                <Label htmlFor="low_stock_threshold">Low-stock alert level</Label>
+                <Label htmlFor="low_stock_threshold">{t('products.lowStockLevel')}</Label>
                 <Input
                   id="low_stock_threshold"
                   type="number"
@@ -1004,14 +1045,11 @@ const Products = () => {
                   onChange={e => setFormData({ ...formData, low_stock_threshold: e.target.value })}
                   placeholder="5"
                 />
-                <p className="text-xs text-muted-foreground mt-1">
-                  Email the admin when this product's stock falls to or below this
-                  number. Default 5.
-                </p>
+                <p className="text-xs text-muted-foreground mt-1">{t('products.lowStockHint')}</p>
               </div>
 
               <div>
-                <Label htmlFor="tax_rate">Tax Rate (GST %)</Label>
+                <Label htmlFor="tax_rate">{t('products.taxRate')}</Label>
                 <Input
                   id="tax_rate"
                   type="number"
@@ -1023,24 +1061,106 @@ const Products = () => {
                   placeholder="5"
                 />
                 <p className="text-xs text-muted-foreground mt-1">
-                  Default 0. Set 5 for taxable goods; keep 0 for exempt items
-                  like papad / papad katran.
+                  {t('products.taxRateHintPrefix')}
+                  <strong>{t('products.taxRateHintStrong')}</strong>
+                  {t('products.taxRateHintSuffix')}
                 </p>
               </div>
+            </div>
+
+            {/* ---- GST classification (HSN) ----
+                Its own block rather than another cell in the grid above: the
+                code drives what gets filed, and it needs room for the statutory
+                rate, the caveat on the chosen heading, and the mismatch warning.
+                Nothing here ever writes tax_rate on its own — the "Use N%"
+                button is an explicit click, because what we charge is the
+                owner's decision and a silent rate change would re-split the GST
+                on every future invoice. */}
+            <div className="space-y-2 rounded-lg border p-3">
+              <div>
+                <Label htmlFor="hsn_code" className="text-base">{t('products.hsnLabel')}</Label>
+                <p className="text-xs text-muted-foreground">{t('products.hsnHint')}</p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <Select
+                    value={formData.hsn_code || 'none'}
+                    onValueChange={v =>
+                      setFormData({ ...formData, hsn_code: v === 'none' ? '' : v })}
+                  >
+                    <SelectTrigger id="hsn_code">
+                      <SelectValue placeholder={t('products.hsnChoose')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">{t('products.hsnNotClassified')}</SelectItem>
+                      {hsnCodes.map(c => (
+                        <SelectItem key={c.code} value={c.code}>
+                          {c.code} — {c.description} ({c.gst_rate}%)
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Input
+                    aria-label={t('products.hsnTypedLabel')}
+                    value={formData.hsn_code}
+                    onChange={e => setFormData({ ...formData, hsn_code: e.target.value })}
+                    placeholder={t('products.hsnTypePlaceholder')}
+                  />
+                </div>
+              </div>
+
+              {selectedHsn && (
+                <div className="rounded-md bg-muted/50 p-2 text-xs space-y-1">
+                  <p>
+                    <strong>{selectedHsn.code}</strong> — {selectedHsn.description}.
+                    {' '}{t('products.hsnCurrentRate')}{' '}
+                    <strong>{selectedHsn.gst_rate}%</strong>
+                    {hsnRef?.rates_as_of && <> {t('products.hsnAsOf', { date: hsnRef.rates_as_of })}</>}.
+                  </p>
+                  {selectedHsn.note && (
+                    <p className="text-muted-foreground">{selectedHsn.note}</p>
+                  )}
+                </div>
+              )}
+
+              {rateDiffers && (
+                <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-2 text-xs space-y-2">
+                  <p>
+                    {t('products.hsnMismatchPrefix')}
+                    <strong>{enteredRate}%</strong>
+                    {t('products.hsnMismatchMiddle', { code: selectedHsn!.code })}
+                    <strong>{selectedHsn!.gst_rate}%</strong>
+                    {t('products.hsnMismatchSuffix')}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setFormData({
+                      ...formData, tax_rate: String(selectedHsn!.gst_rate),
+                    })}
+                  >
+                    {t('products.hsnUseRate', { rate: selectedHsn!.gst_rate })}
+                  </Button>
+                </div>
+              )}
+
+              {!formData.hsn_code && (
+                <p className="text-xs text-muted-foreground">{t('products.hsnBlankHint')}</p>
+              )}
             </div>
 
             {/* Homepage Sections */}
             <div className="space-y-2 rounded-lg border p-3">
               <div>
-                <Label className="text-base">Homepage Sections</Label>
-                <p className="text-xs text-muted-foreground">
-                  Choose which homepage sections this product appears in.
-                </p>
+                <Label className="text-base">{t('products.homepageSections')}</Label>
+                <p className="text-xs text-muted-foreground">{t('products.homepageSectionsHint')}</p>
               </div>
               {sections.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No sections defined yet. Create sections in the Django admin first.
-                </p>
+                <p className="text-sm text-muted-foreground">{t('products.noSections')}</p>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {sections.map((section) => (
@@ -1056,7 +1176,7 @@ const Products = () => {
                       />
                       <span className="truncate">{section.name}</span>
                       {!section.is_active && (
-                        <span className="text-xs text-muted-foreground">(inactive)</span>
+                        <span className="text-xs text-muted-foreground">{t('products.sectionInactive')}</span>
                       )}
                     </label>
                   ))}
@@ -1066,22 +1186,22 @@ const Products = () => {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="shelf_life">Shelf Life</Label>
+                <Label htmlFor="shelf_life">{t('products.shelfLife')}</Label>
                 <Input
                   id="shelf_life"
                   value={formData.shelf_life}
                   onChange={e => setFormData({ ...formData, shelf_life: e.target.value })}
-                  placeholder="12 months"
+                  placeholder={t('products.shelfLifePlaceholder')}
                 />
               </div>
 
               <div>
-                <Label htmlFor="ingredients">Ingredients</Label>
+                <Label htmlFor="ingredients">{t('products.ingredients')}</Label>
                 <Input
                   id="ingredients"
                   value={formData.ingredients}
                   onChange={e => setFormData({ ...formData, ingredients: e.target.value })}
-                  placeholder="Turmeric, Salt"
+                  placeholder={t('products.ingredientsPlaceholder')}
                 />
               </div>
             </div>
@@ -1089,7 +1209,7 @@ const Products = () => {
             {/* Gallery Images Section */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <Label>Gallery Images</Label>
+                <Label>{t('products.galleryImages')}</Label>
                 <label className="cursor-pointer">
                   <input
                     type="file"
@@ -1099,7 +1219,7 @@ const Products = () => {
                     className="hidden"
                   />
                   <Button type="button" variant="outline" size="sm" asChild>
-                    <span><ImagePlus className="mr-2 h-4 w-4" /> Add Images</span>
+                    <span><ImagePlus className="mr-2 h-4 w-4" /> {t('products.addImages')}</span>
                   </Button>
                 </label>
               </div>
@@ -1111,14 +1231,14 @@ const Products = () => {
                   <div key={img.id} className="relative group">
                     <img
                       src={img.image}
-                      alt={img.alt_text || 'Gallery image'}
+                      alt={img.alt_text || t('products.galleryAlt')}
                       className="h-24 w-full object-cover rounded-lg border"
                     />
                     <button
                       type="button"
                       onClick={() => handleDeleteExistingGalleryImage(img.id)}
                       className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                      title="Delete image"
+                      title={t('products.deleteImage')}
                     >
                       <X className="h-3 w-3" />
                     </button>
@@ -1130,17 +1250,17 @@ const Products = () => {
                   <div key={`new-${index}`} className="relative group">
                     <img
                       src={img.preview}
-                      alt={`New image ${index + 1}`}
+                      alt={t('products.newImageAlt', { index: index + 1 })}
                       className="h-24 w-full object-cover rounded-lg border border-dashed border-primary"
                     />
                     <div className="absolute inset-0 bg-primary/10 rounded-lg flex items-center justify-center">
-                      <span className="text-xs font-medium text-primary">New</span>
+                      <span className="text-xs font-medium text-primary">{t('products.newBadge')}</span>
                     </div>
                     <button
                       type="button"
                       onClick={() => handleRemoveNewGalleryImage(index)}
                       className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                      title="Remove image"
+                      title={t('products.removeImage')}
                     >
                       <X className="h-3 w-3" />
                     </button>
@@ -1150,7 +1270,7 @@ const Products = () => {
                 {/* Empty state */}
                 {galleryImages.length === 0 && newGalleryImages.length === 0 && (
                   <div className="col-span-4 text-center py-6 text-muted-foreground text-sm border rounded-lg border-dashed">
-                    No gallery images. Click "Add Images" to upload.
+                    {t('products.noGalleryImages')}
                   </div>
                 )}
               </div>
@@ -1158,7 +1278,7 @@ const Products = () => {
               {uploadingGallery && (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Uploading gallery images...
+                  {t('products.uploadingGallery')}
                 </div>
               )}
             </div>
@@ -1172,7 +1292,7 @@ const Products = () => {
                   onChange={e => setFormData({ ...formData, organic: e.target.checked })}
                   className="rounded"
                 />
-                <Label htmlFor="organic" className="cursor-pointer">Organic</Label>
+                <Label htmlFor="organic" className="cursor-pointer">{t('products.organic')}</Label>
               </div>
 
               <div className="flex items-center space-x-2">
@@ -1183,7 +1303,7 @@ const Products = () => {
                   onChange={e => setFormData({ ...formData, is_active: e.target.checked })}
                   className="rounded"
                 />
-                <Label htmlFor="is_active" className="cursor-pointer">Active</Label>
+                <Label htmlFor="is_active" className="cursor-pointer">{t('common.active')}</Label>
               </div>
 
               <div className="flex items-center space-x-2">
@@ -1194,22 +1314,22 @@ const Products = () => {
                   onChange={e => setFormData({ ...formData, is_featured: e.target.checked })}
                   className="rounded"
                 />
-                <Label htmlFor="is_featured" className="cursor-pointer">Featured</Label>
+                <Label htmlFor="is_featured" className="cursor-pointer">{t('products.featured')}</Label>
               </div>
             </div>
 
             <DialogFooter className="gap-2">
               <Button type="button" variant="outline" onClick={() => { setDialogOpen(false); resetForm(); }} disabled={submitting}>
-                Cancel
+                {t('common.cancel')}
               </Button>
               <Button type="submit" disabled={submitting}>
                 {submitting ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    {editingProduct ? 'Updating...' : 'Creating...'}
+                    {editingProduct ? t('products.updating') : t('products.creating')}
                   </>
                 ) : (
-                  editingProduct ? 'Update Product' : 'Create Product'
+                  editingProduct ? t('products.updateProduct') : t('products.createProduct')
                 )}
               </Button>
             </DialogFooter>

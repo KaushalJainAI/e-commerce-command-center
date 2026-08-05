@@ -10,9 +10,14 @@ import {
 } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
-import { Search, ArrowLeft, Phone, Mail, MapPin, MessageCircle, Download, ChevronRight } from 'lucide-react';
+import { Search, ArrowLeft, Phone, Mail, MapPin, MessageCircle, Download, ChevronRight, Loader2, X } from 'lucide-react';
 import { exportCustomersCsv } from '@/api/bulk';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useAdminData } from '@/hooks/useAdminData';
+import { TableSkeleton } from '@/components/TableSkeleton';
+import { PageHelp } from '@/components/PageHelp';
+import { useTranslation } from 'react-i18next';
 
 const PAGE_SIZE = 12; // matches backend REST_FRAMEWORK PAGE_SIZE
 
@@ -28,53 +33,67 @@ const waLink = (phone: string | null) => {
 };
 
 const Customers = () => {
+  const { t } = useTranslation();
   const { id } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
   const isMobile = useIsMobile();
 
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [detail, setDetail] = useState<CustomerDetail | null>(null);
-  const [search, setSearch] = useState('');
+  // What has been typed vs. what has actually been searched for. Typing only
+  // moves `searchInput`; nothing reaches the server until Enter or the Search
+  // button promotes it to `appliedSearch`.
+  const [searchInput, setSearchInput] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
   const [page, setPage] = useState(1);
-  const [totalCount, setTotalCount] = useState(0);
-  const [loading, setLoading] = useState(true);
 
+  // List mode. The key carries the applied query and page, so React Query
+  // caches each combination.
+  const { data, isInitialLoading, refreshing } = useAdminData(
+    ['customers', appliedSearch, page],
+    () => getCustomers(appliedSearch, page).then(res => ({
+      results: res.data.results || [],
+      count: res.data.count || 0,
+    })),
+    { enabled: !id },
+  );
+
+  const submitSearch = () => {
+    setPage(1);
+    setAppliedSearch(searchInput.trim());
+  };
+
+  /** Clearing is instant — asking to see everyone again shouldn't need Enter. */
+  const clearSearch = () => {
+    setSearchInput('');
+    if (appliedSearch) { setPage(1); setAppliedSearch(''); }
+  };
+  const customers = data?.results ?? [];
+  const totalCount = data?.count ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
-  // List mode: refetch when search (debounced) or page changes.
-  useEffect(() => {
-    if (id) return;
-    setLoading(true);
-    const timer = setTimeout(async () => {
-      try {
-        const res = await getCustomers(search, page);
-        setCustomers(res.data.results || []);
-        setTotalCount(res.data.count || 0);
-      } catch {
-        toast({ title: 'Error', description: 'Failed to load customers', variant: 'destructive' });
-      } finally {
-        setLoading(false);
-      }
-    }, search ? 300 : 0);
-    return () => clearTimeout(timer);
-  }, [id, search, page, toast]);
+  // Detail mode — a separate cache entry per customer, so going back to one
+  // already viewed renders immediately.
+  const { data: detail, error: detailError, isInitialLoading: detailLoading } =
+    useAdminData(['customer', id], () => getCustomer(id!).then(res => res.data), {
+      enabled: Boolean(id),
+    });
 
-  // Detail mode.
   useEffect(() => {
-    if (!id) { setDetail(null); return; }
-    setLoading(true);
-    getCustomer(id)
-      .then(res => setDetail(res.data))
-      .catch(() => {
-        toast({ title: 'Error', description: 'Failed to load customer', variant: 'destructive' });
-        navigate('/customers');
-      })
-      .finally(() => setLoading(false));
-  }, [id, navigate, toast]);
+    if (detailError) navigate('/customers');
+  }, [detailError, navigate]);
 
-  if (loading) {
-    return <div className="flex items-center justify-center min-h-[400px]">Loading...</div>;
+  if (id && (detailLoading || !detail)) {
+    return (
+      <div className="space-y-6 p-6">
+        <Skeleton className="h-9 w-40" />
+        <Skeleton className="h-8 w-64" />
+        <div className="grid gap-4 grid-cols-2">
+          <Skeleton className="h-28" />
+          <Skeleton className="h-28" />
+        </div>
+        <TableSkeleton rows={5} columns={4} />
+      </div>
+    );
   }
 
   // ---------- Detail view ----------
@@ -83,7 +102,7 @@ const Customers = () => {
     return (
       <div className="space-y-6 p-6">
         <Button variant="ghost" onClick={() => navigate('/customers')}>
-          <ArrowLeft className="mr-2 h-4 w-4" /> All customers
+          <ArrowLeft className="mr-2 h-4 w-4" /> {t('customers.allCustomers')}
         </Button>
 
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
@@ -97,13 +116,13 @@ const Customers = () => {
               {detail.address && (
                 <p className="flex items-center gap-2"><MapPin className="h-4 w-4" /> {detail.address}</p>
               )}
-              <p>Customer since {formatDate(detail.created_at)}</p>
+              <p>{t('customers.customerSince', { date: formatDate(detail.created_at) })}</p>
             </div>
           </div>
           {wa && (
             <Button asChild className="bg-green-600 hover:bg-green-700">
               <a href={wa} target="_blank" rel="noreferrer">
-                <MessageCircle className="mr-2 h-4 w-4" /> WhatsApp
+                <MessageCircle className="mr-2 h-4 w-4" /> {t('customers.whatsapp')}
               </a>
             </Button>
           )}
@@ -111,29 +130,29 @@ const Customers = () => {
 
         <div className="grid gap-4 grid-cols-2">
           <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Orders placed</CardTitle></CardHeader>
+            <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">{t('customers.ordersPlaced')}</CardTitle></CardHeader>
             <CardContent><div className="text-3xl font-bold">{detail.order_count}</div></CardContent>
           </Card>
           <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Total spent</CardTitle></CardHeader>
+            <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">{t('customers.totalSpent')}</CardTitle></CardHeader>
             <CardContent><div className="text-3xl font-bold">₹{Number(detail.total_spent).toLocaleString('en-IN')}</div></CardContent>
           </Card>
         </div>
 
         <Card>
-          <CardHeader><CardTitle>Order history</CardTitle></CardHeader>
+          <CardHeader><CardTitle>{t('customers.orderHistory')}</CardTitle></CardHeader>
           <CardContent className="overflow-x-auto">
             {detail.orders.length === 0 ? (
-              <p className="text-center text-muted-foreground py-6">No orders yet.</p>
+              <p className="text-center text-muted-foreground py-6">{t('customers.noOrders')}</p>
             ) : (
               <Table className="min-w-[500px]">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Order</TableHead>
-                    <TableHead>Date</TableHead>
-                    <TableHead>Payment</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Total</TableHead>
+                    <TableHead>{t('customers.colOrder')}</TableHead>
+                    <TableHead>{t('common.date')}</TableHead>
+                    <TableHead>{t('orders.colPayment')}</TableHead>
+                    <TableHead>{t('common.status')}</TableHead>
+                    <TableHead className="text-right">{t('common.total')}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -146,7 +165,9 @@ const Customers = () => {
                       <TableCell className="font-medium">{o.order_number}</TableCell>
                       <TableCell>{formatDate(o.created_at)}</TableCell>
                       <TableCell>{o.payment_method || '—'}</TableCell>
-                      <TableCell className="capitalize">{o.status}</TableCell>
+                      <TableCell>
+                        {t(`orderStatus.${o.status}`, { defaultValue: o.status })}
+                      </TableCell>
                       <TableCell className="text-right font-mono">₹{o.total_amount}</TableCell>
                     </TableRow>
                   ))}
@@ -164,32 +185,62 @@ const Customers = () => {
     <div className="space-y-6 p-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Customers</h1>
-          <p className="text-muted-foreground">
-            Find a customer by name, phone, or email to see their orders.
-          </p>
+          <h1 className="text-3xl font-bold tracking-tight">{t('customers.title')}</h1>
+          <p className="text-muted-foreground">{t('customers.subtitle')}</p>
         </div>
         <Button variant="outline" onClick={() => exportCustomersCsv()}>
-          <Download className="mr-2 h-4 w-4" /> Export to Excel
+          <Download className="mr-2 h-4 w-4" /> {t('customers.exportButton')}
         </Button>
       </div>
 
+      <PageHelp>{t('customers.pageHelp')}</PageHelp>
+
       <Card>
         <CardHeader>
-          <div className="relative max-w-md">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search name, phone, or email…"
-              className="pl-8"
-              value={search}
-              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-            />
+          {/* Typing does nothing on its own — Enter or the Search button runs it. */}
+          <div className="flex max-w-xl items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder={t('customers.searchPlaceholder')}
+                className="pl-8 pr-8"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); submitSearch(); }
+                  if (e.key === 'Escape') clearSearch();
+                }}
+              />
+              {searchInput && (
+                <button
+                  type="button"
+                  onClick={clearSearch}
+                  title={t('customers.clearSearch')}
+                  className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+            <Button onClick={submitSearch} disabled={refreshing}>
+              {refreshing
+                ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                : <Search className="mr-2 h-4 w-4" />}
+              {t('common.search')}
+            </Button>
           </div>
+          {appliedSearch !== searchInput.trim() && searchInput.trim() && (
+            <p className="text-xs text-muted-foreground pt-1">{t('customers.pressEnter')}</p>
+          )}
         </CardHeader>
-        <CardContent className="overflow-x-auto">
-          {customers.length === 0 ? (
+        <CardContent
+          className={`overflow-x-auto transition-opacity ${refreshing && !isInitialLoading ? 'opacity-60' : 'opacity-100'}`}
+        >
+          {isInitialLoading ? (
+            <TableSkeleton rows={6} columns={5} />
+          ) : customers.length === 0 ? (
             <p className="text-center text-muted-foreground py-8">
-              {search ? 'No customers match your search.' : 'No customers yet.'}
+              {appliedSearch ? t('customers.noMatch') : t('customers.empty')}
             </p>
           ) : isMobile ? (
             // Mobile: stacked cards instead of a wide horizontally-scrolling table.
@@ -204,7 +255,8 @@ const Customers = () => {
                     <p className="font-medium truncate">{c.name}</p>
                     <p className="text-xs text-muted-foreground truncate">{c.phone || c.email}</p>
                     <p className="text-xs text-muted-foreground">
-                      {c.order_count} order{c.order_count === 1 ? '' : 's'} · ₹{Number(c.total_spent).toLocaleString('en-IN')}
+                      {t('customers.ordersCount', { count: c.order_count })}
+                      {' · '}₹{Number(c.total_spent).toLocaleString('en-IN')}
                     </p>
                   </div>
                   <ChevronRight className="h-5 w-5 flex-shrink-0 text-muted-foreground" />
@@ -215,11 +267,11 @@ const Customers = () => {
             <Table className="min-w-[600px]">
               <TableHeader>
                 <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Contact</TableHead>
-                  <TableHead>Location</TableHead>
-                  <TableHead>Orders</TableHead>
-                  <TableHead className="text-right">Total spent</TableHead>
+                  <TableHead>{t('common.name')}</TableHead>
+                  <TableHead>{t('customers.colContact')}</TableHead>
+                  <TableHead>{t('customers.colLocation')}</TableHead>
+                  <TableHead>{t('customers.colOrders')}</TableHead>
+                  <TableHead className="text-right">{t('customers.colTotalSpent')}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -248,14 +300,14 @@ const Customers = () => {
           {totalPages > 1 && (
             <div className="flex items-center justify-between pt-4">
               <p className="text-sm text-muted-foreground">
-                Page {page} of {totalPages} ({totalCount} customers)
+                {t('customers.pager', { page, total: totalPages, count: totalCount })}
               </p>
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
-                  Previous
+                  {t('common.previous')}
                 </Button>
                 <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
-                  Next
+                  {t('common.next')}
                 </Button>
               </div>
             </div>
