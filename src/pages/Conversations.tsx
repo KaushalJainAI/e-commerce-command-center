@@ -95,12 +95,28 @@ const Conversations = () => {
     try {
       await adminReply(selected.conversation_id, replyText.trim());
       setReplyText('');
+      // Replying hands the thread to you — the AI stops answering it.
+      setSelected((prev) => (prev ? { ...prev, ai_paused: true } : prev));
       await fetchMessages(selected.conversation_id);
       await fetchConversations();
     } catch {
       toast({ title: t('conversations.sendFailed'), variant: 'destructive' });
     } finally {
       setSending(false);
+    }
+  };
+
+  // Hand the thread back to the AI. Replying takes the thread automatically, so
+  // this is the only way to give it back before the idle window elapses.
+  const handleResumeAI = async () => {
+    if (!selected) return;
+    try {
+      await patchConversation(selected.conversation_id, { ai_paused: false });
+      setSelected((prev) => (prev ? { ...prev, ai_paused: false, ai_paused_by: '' } : prev));
+      await fetchConversations();
+      toast({ title: t('conversations.aiResumedToast') });
+    } catch {
+      toast({ title: t('conversations.aiResumeFailed'), variant: 'destructive' });
     }
   };
 
@@ -233,6 +249,17 @@ const Conversations = () => {
                 <Badge variant="outline" className="text-orange-600 border-orange-300 text-xs">
                   {t('conversations.needsAttention')}
                 </Badge>
+              )}
+              {selected.ai_paused && (
+                <Badge variant="outline" className="text-blue-600 border-blue-300 text-xs">
+                  {t('conversations.aiPaused')}
+                </Badge>
+              )}
+              {selected.ai_paused && selected.status !== 'resolved' && (
+                <Button size="sm" variant="outline" className="gap-1.5 text-xs" onClick={handleResumeAI}>
+                  <Bot className="h-3.5 w-3.5" />
+                  {t('conversations.resumeAI')}
+                </Button>
               )}
               <Badge
                 variant="outline"

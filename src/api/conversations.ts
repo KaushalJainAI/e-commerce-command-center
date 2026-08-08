@@ -5,6 +5,11 @@ export interface ConversationSummary {
   title: string;
   status: 'active' | 'resolved' | 'archived';
   needs_human: boolean;
+  /** True while this thread is handed off to a human and the AI is staying
+   *  silent. Set by any admin reply; auto-releases after an idle window. */
+  ai_paused: boolean;
+  /** Display name of the admin who took the thread ('' if unknown). */
+  ai_paused_by: string;
   last_message: string;
   user_email: string | null;
   updated_at: string;
@@ -47,7 +52,7 @@ export const adminReply = async (
 
 export const patchConversation = async (
   conversationId: string,
-  payload: { status?: string; needs_human?: boolean }
+  payload: { status?: string; needs_human?: boolean; ai_paused?: false }
 ): Promise<ConversationSummary> => {
   const { data } = await api.patch(
     `/assistant/conversations/${conversationId}/`,
